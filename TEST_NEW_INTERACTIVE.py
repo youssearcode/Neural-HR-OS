@@ -239,7 +239,10 @@ else:
                 conn = sqlite3.connect(SQL_DB)
                 df = pd.read_sql_query("SELECT * FROM employees WHERE CAST(id AS TEXT) = ?", conn, params=(sid,))
                 conn.close()
-                if not df.empty: st.dataframe(df, use_container_width=True)
+                if not df.empty:
+                    # Apply Status Emoji
+                    df['is_active'] = df['is_active'].apply(lambda x: "🟢 ACTIVE" if x == 1 else "🔴 TERMINATED")
+                    st.dataframe(df, use_container_width=True)
                 else: st.error("ID Not Found")
             else: st.warning("Please enter an ID first.")
 
@@ -324,14 +327,16 @@ else:
     elif menu == "📂 STAFF DIRECTORY":
         st.header("Staff Records Overview")
         conn = sqlite3.connect(SQL_DB)
-        st.dataframe(pd.read_sql_query("SELECT * FROM employees", conn), use_container_width=True)
+        df = pd.read_sql_query("SELECT * FROM employees", conn)
         conn.close()
+        # Apply Visual Indicators
+        df['is_active'] = df['is_active'].apply(lambda x: "🟢" if x == 1 else "🔴")
+        st.dataframe(df, use_container_width=True)
 
     elif menu == "📊 DAILY REPORTS":
         st.header("Daily Attendance Intelligence")
         today = datetime.now().strftime('%Y-%m-%d')
         conn = sqlite3.connect(SQL_DB)
-        # UPDATED: Added a.clock_out and strictly filtered for e.is_active = 1
         q = f"""
             SELECT 
                 a.emp_id, 
