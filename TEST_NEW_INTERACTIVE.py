@@ -324,19 +324,12 @@ else:
                 st.warning(f"⚠️ ACCESS UPDATED: {target['name']} is now {'ACTIVE' if new_s == 1 else 'BANNED'}")
                 del st.session_state['term_target']; time.sleep(1); st.rerun()
 
-    elif menu == "📂 STAFF DIRECTORY":
-        st.header("Staff Records Overview")
-        conn = sqlite3.connect(SQL_DB)
-        df = pd.read_sql_query("SELECT * FROM employees", conn)
-        conn.close()
-        # Apply Visual Indicators
-        df['is_active'] = df['is_active'].apply(lambda x: "🟢" if x == 1 else "🔴")
-        st.dataframe(df, use_container_width=True)
-
-    elif menu == "📊 DAILY REPORTS":
+  elif menu == "📊 DAILY REPORTS":
         st.header("Daily Attendance Intelligence")
         today = datetime.now().strftime('%Y-%m-%d')
         conn = sqlite3.connect(SQL_DB)
+        
+        # 1. Fetch Today's Data
         q = f"""
             SELECT 
                 a.emp_id, 
@@ -352,7 +345,34 @@ else:
         """
         df = pd.read_sql_query(q, conn)
         conn.close()
+
         if not df.empty: 
             st.dataframe(df, use_container_width=True)
+            
+            st.divider()
+            # 2. Add System Maintenance Options
+            st.subheader("🧹 System Maintenance")
+            col1, col2 = st.columns([1, 3])
+            
+            with col1:
+                # Use a confirmation checkbox to prevent accidental clicks
+                confirm_clear = st.checkbox("Confirm Purge")
+                if st.button("🔥 PURGE TODAY'S LOGS", type="primary", disabled=not confirm_clear):
+                    try:
+                        conn = sqlite3.connect(SQL_DB)
+                        # Only delete records matching today's date
+                        conn.execute("DELETE FROM attendance WHERE date = ?", (today,))
+                        conn.commit()
+                        conn.close()
+                        
+                        st.success(f"All logs for {today} have been cleared.")
+                        time.sleep(1)
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Purge Failed: {e}")
+            
+            with col2:
+                st.info("Note: Purging only removes clock-in/out records for today. Employee profiles and historical data remain untouched.")
+        
         else: 
             st.info("No active logs for today.")
