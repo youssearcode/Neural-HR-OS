@@ -331,7 +331,23 @@ else:
         st.header("Daily Attendance Intelligence")
         today = datetime.now().strftime('%Y-%m-%d')
         conn = sqlite3.connect(SQL_DB)
-        q = f"SELECT a.emp_id, e.first_name, e.dept_name, a.clock_in, a.late_minutes FROM attendance a JOIN employees e ON a.emp_id = e.id WHERE a.date = '{today}' AND e.is_active = 1"
-        df = pd.read_sql_query(q, conn); conn.close()
-        if not df.empty: st.dataframe(df, use_container_width=True)
-        else: st.info("No active logs for today.")
+        # UPDATED: Added a.clock_out and strictly filtered for e.is_active = 1
+        q = f"""
+            SELECT 
+                a.emp_id, 
+                e.first_name, 
+                e.dept_name, 
+                a.clock_in, 
+                a.clock_out, 
+                a.late_minutes, 
+                a.penalty 
+            FROM attendance a 
+            JOIN employees e ON a.emp_id = e.id 
+            WHERE a.date = '{today}' AND e.is_active = 1
+        """
+        df = pd.read_sql_query(q, conn)
+        conn.close()
+        if not df.empty: 
+            st.dataframe(df, use_container_width=True)
+        else: 
+            st.info("No active logs for today.")
