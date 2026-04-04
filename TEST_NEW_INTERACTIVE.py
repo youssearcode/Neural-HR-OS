@@ -104,7 +104,7 @@ def send_security_alert(subject, body):
             server.send_message(msg)
         return True
     except Exception as e:
-        print(f"Alert Failed: {e}")
+        st.error(f"Email Alert Failed: {e}")
         return False
 
 # --- 5. TRANSFORMERS ---
@@ -157,7 +157,7 @@ class FaceRecognitionTransformer(VideoTransformerBase):
                 if active == 0:
                     color, label = (0, 0, 255), f"⚠️ ACCESS DENIED: {fname}"
                     if eid not in self.last_alert or (time.time() - self.last_alert[eid]) > 3600:
-                        send_security_alert("BANNED ACCESS ATTEMPT", f"Terminated employee '{fname}' (ID: {eid}) was detected at the Gateway Vision Feed.")
+                        send_security_alert("BANNED ACCESS ATTEMPT", f"Terminated employee '{fname}' (ID: {eid}) was detected.")
                         self.last_alert[eid] = time.time()
                 else:
                     color, label = (0, 255, 0), f"VERIFIED: {fname}"
@@ -177,27 +177,45 @@ if not st.session_state.authenticated:
         st.markdown('<div class="main-card" style="margin-top: 15%;">', unsafe_allow_html=True)
         st.title("🛡️ NEURAL GATEWAY")
         pwd = st.text_input("HR Security Password", type="password")
+        
         if st.button("AUTHORIZE ACCESS", use_container_width=True, type="primary"):
             with open(PASS_FILE, "r") as f:
                 if pwd == f.read().strip():
                     st.session_state.authenticated = True
                     st.rerun()
-                else: st.error("Unauthorized Credentials")
+                else: 
+                    st.error("Unauthorized Credentials")
 
         with st.expander("Forgot System Password?"):
-            mk = st.text_input("Master Reset Key", type="password")
-            new_p = st.text_input("New Secure Password", type="password")
+            mk = st.text_input("Master Reset Key", type="password", key="m_key")
+            new_p = st.text_input("New Secure Password", type="password", key="n_pass")
+            
             if st.button("OVERRIDE & RESET"):
-                if mk == MASTER_KEY:
-                    alert_msg = f"A manual system override was performed using the Master Key. The HR password has been reset to: {new_p}"
-                    send_security_alert("MASTER KEY OVERRIDE DETECTED", alert_msg)
-                    with open(PASS_FILE, "w") as f: f.write(new_p)
-                    st.success("System Reset Successful. Security Alert Sent to HR.")
-                    time.sleep(2)
-                    st.rerun()
-                else: st.error("Master Key Authentication Failed")
+                if not mk or not new_p:
+                    st.warning("Please enter BOTH the Master Key and your New Password.")
+                elif mk == MASTER_KEY:
+                    alert_msg = (
+                        f"ALERT: A manual system override was performed.\n"
+                        f"Action: Password Reset\n"
+                        f"New HR Password Set To: {new_p}\n"
+                        f"Authorized by: Master Key Protocol"
+                    )
+                    with st.spinner("Notifying HR and resetting system..."):
+                        success = send_security_alert("MASTER KEY OVERRIDE DETECTED", alert_msg)
+                        if success:
+                            with open(PASS_FILE, "w") as f:
+                                f.write(new_p)
+                            st.success("System Reset Successful. Alert Sent.")
+                            time.sleep(2)
+                            st.rerun()
+                        else:
+                            st.error("Security Alert failed to send. Reset blocked for safety.")
+                else:
+                    st.error("Invalid Master Key.")
         st.markdown('</div>', unsafe_allow_html=True)
+
 else:
+    # --- LOGGED IN AREA ---
     apply_custom_styles()
     with st.sidebar:
         st.title("NEURAL HR OS 2026")
