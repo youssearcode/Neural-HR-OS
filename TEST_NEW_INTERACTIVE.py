@@ -17,7 +17,6 @@ import time
 st.set_page_config(page_title="NEURAL HR OS 2026", layout="wide", page_icon="🛡️")
 
 # --- 2. CLOUD DATABASE (SECURE ACCESS) ---
-# This pulls the data from the 'Secrets' vault you just created
 DB_CONFIG = {
     "dbname": st.secrets["database"]["dbname"],
     "user": st.secrets["database"]["user"],
@@ -26,8 +25,10 @@ DB_CONFIG = {
     "port": st.secrets["database"]["port"]
 }
 
-def get_db_connection():
-    # Adding a timeout helps the app wait for the pooler to respond
+# --- FIX 2: Updated Connection Function ---
+def get_db_connection(cursor_factory=None):
+    if cursor_factory:
+        return psycopg2.connect(**DB_CONFIG, connect_timeout=10, cursor_factory=cursor_factory)
     return psycopg2.connect(**DB_CONFIG, connect_timeout=10)
 
 def init_cloud_db():
@@ -56,7 +57,10 @@ def init_cloud_db():
     cur.close()
     conn.close()
 
-init_cloud_db()
+# --- FIX 3: Initialize DB only once per session ---
+if 'db_initialized' not in st.session_state:
+    init_cloud_db()
+    st.session_state.db_initialized = True
 
 # --- 3. SYSTEM GLOBALS ---
 EMAIL_USER = "mohamedauoup@gmail.com"
@@ -206,13 +210,18 @@ else:
         sid = st.text_input("Enter Target ID")
         if st.button("RUN QUERY"):
             if sid:
-                conn = get_db_connection()
-                df = pd.read_sql_query("SELECT * FROM employees WHERE id::text = %s", conn, params=(sid,))
-                conn.close()
-                if not df.empty:
-                    df['is_active'] = df['is_active'].apply(lambda x: "🟢 ACTIVE" if x == 1 else "🔴 TERMINATED")
-                    st.dataframe(df, use_container_width=True)
-                else: st.error("ID Not Found")
+                # --- FIX 1: Search Logic with Error Handling ---
+                try:
+                    target_id = int(sid)
+                    conn = get_db_connection()
+                    df = pd.read_sql_query("SELECT * FROM employees WHERE id = %s", conn, params=(target_id,))
+                    conn.close()
+                    if not df.empty:
+                        df['is_active'] = df['is_active'].apply(lambda x: "🟢 ACTIVE" if x == 1 else "🔴 TERMINATED")
+                        st.dataframe(df, use_container_width=True)
+                    else: st.error("ID Not Found")
+                except ValueError:
+                    st.error("Please enter a valid numeric ID")
 
     elif menu == "➕ ENROLL USER":
         st.header("👤 Biometric Enrollment")
@@ -243,7 +252,8 @@ else:
         st.header("📝 Update Records")
         mid = st.number_input("Target ID", min_value=1, step=1)
         if st.button("FETCH PROFILE"):
-            conn = get_db_connection(); cur = conn.cursor(cursor_factory=RealDictCursor)
+            conn = get_db_connection(cursor_factory=RealDictCursor)
+            cur = conn.cursor()
             cur.execute("SELECT * FROM employees WHERE id=%s", (mid,))
             res = cur.fetchone()
             cur.close(); conn.close()
