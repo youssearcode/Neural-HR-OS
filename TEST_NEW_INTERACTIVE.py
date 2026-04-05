@@ -25,7 +25,6 @@ DB_CONFIG = {
     "port": st.secrets["database"]["port"]
 }
 
-# --- FIX 2: Updated Connection Function ---
 def get_db_connection(cursor_factory=None):
     if cursor_factory:
         return psycopg2.connect(**DB_CONFIG, connect_timeout=10, cursor_factory=cursor_factory)
@@ -34,7 +33,6 @@ def get_db_connection(cursor_factory=None):
 def init_cloud_db():
     conn = get_db_connection()
     cur = conn.cursor()
-    # Create Employees Table
     cur.execute('''CREATE TABLE IF NOT EXISTS employees
                     (id SERIAL PRIMARY KEY,
                      first_name TEXT, last_name TEXT, dept_name TEXT,
@@ -46,7 +44,6 @@ def init_cloud_db():
                      current_status TEXT DEFAULT 'Office',
                      is_active INTEGER DEFAULT 1)''')
 
-    # Create Attendance Table
     cur.execute('''CREATE TABLE IF NOT EXISTS attendance
                     (id SERIAL PRIMARY KEY,
                      emp_id INTEGER, name TEXT, date TEXT,
@@ -57,7 +54,6 @@ def init_cloud_db():
     cur.close()
     conn.close()
 
-# --- FIX 3: Initialize DB only once per session ---
 if 'db_initialized' not in st.session_state:
     init_cloud_db()
     st.session_state.db_initialized = True
@@ -86,7 +82,7 @@ def apply_custom_styles():
     video_base64 = get_video_base64(video_path)
     video_html = f'<video autoplay loop muted playsinline id="bg-video"><source src="data:video/mp4;base64,{video_base64}" type="video/mp4"></video>' if video_base64 else ""
     st.markdown(f"""{video_html}<style>
-        #bg-video {{ position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; object-fit: cover; z-index: -1; filter: brightness(1.0); opacity: 1.0; }}
+        #bg-video {{ position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; object-fit: cover; z-index: -1; }}
         .stApp {{ background: transparent !important; }}
         [data-testid="stHeader"] {{ background: transparent !important; }}
         [data-testid="stSidebar"] {{ background-color: rgba(0, 0, 0, 0.4) !important; backdrop-filter: blur(15px); }}
@@ -111,7 +107,7 @@ def send_security_alert(subject, body):
         st.error(f"Email Alert Failed: {e}")
         return False
 
-# --- 5. TRANSFORMERS ---
+# --- 5. TRANSFORMERS (OPTIMIZED FOR SPEED) ---
 class EnrollmentTransformer(VideoTransformerBase):
     def __init__(self):
         self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
@@ -120,7 +116,6 @@ class EnrollmentTransformer(VideoTransformerBase):
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         faces = self.face_cascade.detectMultiScale(gray, 1.3, 5)
         for (x, y, w, h) in faces:
-            # Color changed to (255, 0, 0) for BLUE in BGR
             cv2.rectangle(img, (x, y), (x + w, y + h), (255, 0, 0), 2)
             cv2.putText(img, "NEW USER SCANNING...", (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
         return img
@@ -129,6 +124,7 @@ class FaceRecognitionTransformer(VideoTransformerBase):
     def __init__(self):
         self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
         self.last_alert = {}
+        self.frame_count = 0
 
     def mark_attendance(self, emp_id, name, shift_start, grace):
         now = datetime.now()
@@ -152,14 +148,26 @@ class FaceRecognitionTransformer(VideoTransformerBase):
         cur.close(); conn.close()
 
     def transform(self, frame):
+        self.frame_count += 1
         img = frame.to_ndarray(format="bgr24")
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        faces = self.face_cascade.detectMultiScale(gray, 1.3, 5)
+        
+        # Optimization: Process every 2nd frame to increase FPS
+        if self.frame_count % 2 != 0:
+            return img
+
+        # Optimization: Resize for faster processing
+        small_img = cv2.resize(img, (0, 0), fx=0.5, fy=0.5)
+        gray = cv2.cvtColor(small_img, cv2.COLOR_BGR2GRAY)
+        faces = self.face_cascade.detectMultiScale(gray, 1.2, 4)
+        
         conn = get_db_connection(); cur = conn.cursor()
         cur.execute("SELECT id, first_name, is_active, shift_start, grace_period FROM employees")
         users = cur.fetchall()
         cur.close(); conn.close()
+
         for (x, y, w, h) in faces:
+            # Scale coordinates back up
+            x, y, w, h = x*2, y*2, w*2, h*2
             color, label = (0, 255, 255), "IDENTIFYING..."
             for eid, fname, active, shift, grace in users:
                 if active == 0:
@@ -217,6 +225,7 @@ else:
                     df = pd.read_sql_query("SELECT * FROM employees WHERE id = %s", conn, params=(target_id,))
                     conn.close()
                     if not df.empty:
+                        # Logic Update: 1 -> Green Active, 0 -> Red Terminated
                         df['is_active'] = df['is_active'].apply(lambda x: "🟢 ACTIVE" if x == 1 else "🔴 TERMINATED")
                         st.dataframe(df, use_container_width=True)
                     else: 
@@ -226,7 +235,6 @@ else:
 
     elif menu == "➕ ENROLL USER":
         st.header("👤 Biometric Enrollment")
-        # Added Live Scan Preview for the HR to confirm the "Scanning Features" are working
         webrtc_streamer(key="enroll_view", video_transformer_factory=EnrollmentTransformer,
                         rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]})
         
@@ -251,7 +259,7 @@ else:
                     nid = cur.fetchone()[0]; folder = f"{nid}_{fn}"
                     cur.execute("UPDATE employees SET folder_name=%s WHERE id=%s", (folder, nid))
                     conn.commit(); cur.close(); conn.close()
-                    st.success(f"✅ Enrollment Complete: ID {nid} Secured In Supabase Cloud."); st.balloons()
+                    st.success(f"✅ Enrollment Complete: ID {nid} Secured."); st.balloons()
 
     elif menu == "📝 MODIFY PERSONNEL":
         st.header("📝 Update Records")
@@ -287,12 +295,11 @@ else:
                 st.session_state['term_target'] = {"id": tid, "name": res[0], "active": res[1]}
             else:
                 st.error("⚠️ No person found in the database with this ID.")
-                if 'term_target' in st.session_state: del st.session_state['term_target']
         
         if 'term_target' in st.session_state:
             target = st.session_state['term_target']
-            status_text = "Active" if target['active'] == 1 else "Terminated"
-            st.info(f"Target: {target['name']} | Current Status: {status_text}")
+            status_label = "🟢 ACTIVE" if target['active'] == 1 else "🔴 TERMINATED"
+            st.info(f"Target: {target['name']} | Status: {status_label}")
             if st.button("TOGGLE ACCESS", type="primary"):
                 new_s = 1 if target['active'] == 0 else 0
                 conn = get_db_connection(); cur = conn.cursor()
@@ -305,32 +312,28 @@ else:
         conn = get_db_connection()
         df = pd.read_sql_query("SELECT * FROM employees ORDER BY id ASC", conn)
         conn.close()
+        # Logic Update: Display labels instead of integers
+        df['is_active'] = df['is_active'].apply(lambda x: "🟢 ACTIVE" if x == 1 else "🔴 TERMINATED")
         st.dataframe(df, use_container_width=True)
 
     elif menu == "📊 DAILY REPORTS":
         st.header("📊 Intelligence Dashboard")
         today = datetime.now().strftime('%Y-%m-%d')
         conn = get_db_connection()
-        
-        # Pull main attendance data
         q = "SELECT a.*, e.first_name, e.dept_name FROM attendance a JOIN employees e ON a.emp_id = e.id WHERE a.date = %s"
         df = pd.read_sql_query(q, conn, params=(today,))
-        
-        # Pull all active employees for absence detection
         all_emp_df = pd.read_sql_query("SELECT id, first_name, dept_name FROM employees WHERE is_active = 1", conn)
         conn.close()
 
         if not df.empty:
-            # --- 2. LIVE OFFICE OCCUPANCY ANALYTICS ---
             c1, c2, c3 = st.columns(3)
-            with c1:
-                st.metric("Total Present", len(df))
-            with c2:
+            with c1: st.metric("Total Present", len(df))
+            with c2: 
                 late_count = len(df[df['late_minutes'] > 0])
-                st.metric("Late Arrivals", late_count, delta=f"{late_count} staff", delta_color="inverse")
-            with c3:
-                occupancy = (len(df) / len(all_emp_df) * 100) if not all_emp_df.empty else 0
-                st.metric("Occupancy Rate", f"{occupancy:.1f}%")
+                st.metric("Late Arrivals", late_count)
+            with c3: 
+                occ = (len(df) / len(all_emp_df) * 100) if not all_emp_df.empty else 0
+                st.metric("Occupancy", f"{occ:.1f}%")
             
             st.divider()
             st.dataframe(df, use_container_width=True)
@@ -340,59 +343,34 @@ else:
             col1, col2, col3 = st.columns(3)
             col4, col5, col6 = st.columns(3)
 
-            # 1. ABSENCE DETECTION
             if col1.button("🚨 DETECT ABSENCES", use_container_width=True):
                 present_ids = df['emp_id'].tolist()
                 absent_df = all_emp_df[~all_emp_df['id'].isin(present_ids)]
-                if not absent_df.empty:
-                    st.warning("Personnel Not Logged In Today:")
-                    st.table(absent_df)
-                else:
-                    st.success("All active personnel are present.")
+                st.warning("Personnel Not Logged In:")
+                st.table(absent_df)
 
-            # 3. PERFORMANCE HEATMAP
-            if col2.button("🔥 PERFORMANCE HEATMAP", use_container_width=True):
-                st.info("Generating 7-Day Trend...")
-                conn = get_db_connection()
-                hist_q = "SELECT date, COUNT(*) as count FROM attendance GROUP BY date ORDER BY date DESC LIMIT 7"
-                hist_df = pd.read_sql_query(hist_q, conn)
-                conn.close()
-                st.bar_chart(hist_df.set_index('date'))
-
-            # 4. EXCEL EXPORT
-            if col3.button("📥 EXPORT TO EXCEL", use_container_width=True):
+            if col2.button("📥 EXPORT TO EXCEL", use_container_width=True):
                 import io
                 output = io.BytesIO()
                 with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
                     df.to_excel(writer, index=False, sheet_name='Daily_Report')
-                st.download_button(label="Download Excel File", data=output.getvalue(), 
-                                   file_name=f"Attendance_{today}.xlsx", mime="application/vnd.ms-excel")
+                st.download_button(label="Download Excel", data=output.getvalue(), file_name=f"Attendance_{today}.xlsx")
 
-            # 5. OVERTIME CALCULATOR
-            if col4.button("⏱️ CALC OVERTIME", use_container_width=True):
-                def calc_hours(row):
-                    if row['clock_in'] and row['clock_out']:
-                        fmt = '%H:%M'
-                        try:
-                            tdelta = datetime.strptime(row['clock_out'], fmt) - datetime.strptime(row['clock_in'], fmt)
-                            return round(tdelta.total_seconds() / 3600, 2)
-                        except: return 0
-                    return 0
-                df['total_hours'] = df.apply(calc_hours, axis=1)
-                st.write("Total Hours Tracked per Person:")
-                st.dataframe(df[['first_name', 'clock_in', 'clock_out', 'total_hours']], use_container_width=True)
+            # Logic Update: Delete all active persons button
+            if col3.button("🗑️ WIPE ALL ACTIVE", use_container_width=True, type="primary"):
+                conn = get_db_connection(); cur = conn.cursor()
+                cur.execute("DELETE FROM employees WHERE is_active = 1")
+                conn.commit(); cur.close(); conn.close()
+                st.error("All Active Personnel have been purged from database."); st.rerun()
 
-            # 6. SHIFT ANALYTICS
-            if col5.button("📊 SHIFT EFFICIENCY", use_container_width=True):
-                avg_late = df['late_minutes'].mean()
-                st.write(f"Average Late Time Today: {avg_late:.2f} minutes")
-                st.progress(min(avg_late/60, 1.0))
-
-            # HR EMAIL DISPATCH
-            if col6.button("📧 DISPATCH TO HR", use_container_width=True):
-                report_body = f"Attendance Report for {today}\nTotal Staff: {len(df)}\nLates: {late_count}"
-                if send_security_alert("DAILY SUMMARY DISPATCH", report_body):
-                    st.success("Report emailed to mohamedauoup@gmail.com")
+            if col4.button("📧 DISPATCH TO HR", use_container_width=True):
+                if send_security_alert("DAILY DISPATCH", f"Report for {today}. Staff present: {len(df)}"):
+                    st.success("Sent to HR.")
 
         else:
-            st.info("No logs for today. Waiting for biometric triggers.")
+            st.info("No logs for today. Looking for active staff...")
+            if st.button("🗑️ WIPE ALL ACTIVE", use_container_width=True, type="primary"):
+                conn = get_db_connection(); cur = conn.cursor()
+                cur.execute("DELETE FROM employees WHERE is_active = 1")
+                conn.commit(); cur.close(); conn.close()
+                st.error("Purged Active Personnel."); st.rerun()
