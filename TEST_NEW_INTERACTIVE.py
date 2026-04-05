@@ -185,12 +185,27 @@ if not st.session_state.authenticated:
         st.markdown('<div class="main-card" style="margin-top: 15%;">', unsafe_allow_html=True)
         st.title("🛡️ NEURAL GATEWAY")
         pwd = st.text_input("HR Security Password", type="password")
-        if st.button("AUTHORIZE ACCESS", use_container_width=True, type="primary"):
+        
+        c1, c2 = st.columns(2)
+        if c1.button("AUTHORIZE ACCESS", use_container_width=True, type="primary"):
             with open(PASS_FILE, "r") as f:
                 if pwd == f.read().strip():
                     st.session_state.authenticated = True
                     st.rerun()
                 else: st.error("Unauthorized Credentials")
+        
+        if c2.button("FORGET PASSWORD", use_container_width=True):
+            st.session_state.forget_pwd = True
+
+        if st.session_state.get("forget_pwd"):
+            email_verify = st.text_input("Enter Admin Email to Reset")
+            if st.button("SEND RESET CODE"):
+                if email_verify == HR_RECIPIENT:
+                    new_temp = "999"
+                    with open(PASS_FILE, "w") as f: f.write(new_temp)
+                    send_security_alert("PASSWORD RESET", f"Temporary Access Key: {new_temp}")
+                    st.success("Temp Key sent to Admin Email.")
+                else: st.error("Email Verification Failed.")
         st.markdown('</div>', unsafe_allow_html=True)
 else:
     apply_custom_styles()
@@ -227,16 +242,27 @@ else:
         webrtc_streamer(key="enroll_view", video_transformer_factory=EnrollmentTransformer,
                         rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]})
         with st.form("enroll_form"):
-            fn, ln = st.text_input("First Name *"), st.text_input("Last Name *")
-            dept = st.selectbox("Dept", ["Technical", "Sales", "HR", "Admin", "Security"])
+            col1, col2 = st.columns(2)
+            fn = col1.text_input("First Name *")
+            ln = col2.text_input("Last Name *")
+            dept = st.selectbox("Department", ["Technical", "Sales", "HR", "Admin", "Security"])
+            email = st.text_input("Email Address")
+            contact = st.text_input("Contact Number")
+            address = st.text_area("Home Address")
+            comp = st.text_input("Compensation / Salary")
+            
             photo = st.camera_input("Capture Biometric ID")
             if st.form_submit_button("✨ COMMIT TO CLOUD"):
                 if fn and photo:
                     conn = get_db_connection(); cur = conn.cursor()
-                    cur.execute("INSERT INTO employees (first_name, last_name, dept_name, is_active) VALUES (%s,%s,%s,1) RETURNING id", (fn, ln, dept))
+                    cur.execute("""INSERT INTO employees 
+                        (first_name, last_name, dept_name, email, contact, address, compensation, is_active) 
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,1) RETURNING id""", 
+                        (fn, ln, dept, email, contact, address, comp))
                     nid = cur.fetchone()[0]
                     conn.commit(); cur.close(); conn.close()
                     st.success(f"ID {nid} Secured."); st.balloons()
+                else: st.warning("First Name and Photo are required.")
 
     elif menu == "📝 MODIFY PERSONNEL":
         st.header("📝 Update Records")
