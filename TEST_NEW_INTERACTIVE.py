@@ -184,28 +184,53 @@ if not st.session_state.authenticated:
     with col:
         st.markdown('<div class="main-card" style="margin-top: 15%;">', unsafe_allow_html=True)
         st.title("🛡️ NEURAL GATEWAY")
-        pwd = st.text_input("HR Security Password", type="password")
         
-        c1, c2 = st.columns(2)
-        if c1.button("AUTHORIZE ACCESS", use_container_width=True, type="primary"):
-            with open(PASS_FILE, "r") as f:
-                if pwd == f.read().strip():
-                    st.session_state.authenticated = True
-                    st.rerun()
-                else: st.error("Unauthorized Credentials")
-        
-        if c2.button("FORGET PASSWORD", use_container_width=True):
-            st.session_state.forget_pwd = True
-
+        # Reset Workflow logic
         if st.session_state.get("forget_pwd"):
-            email_verify = st.text_input("Enter Admin Email to Reset")
-            if st.button("SEND RESET CODE"):
-                if email_verify == HR_RECIPIENT:
-                    new_temp = "999"
-                    with open(PASS_FILE, "w") as f: f.write(new_temp)
-                    send_security_alert("PASSWORD RESET", f"Temporary Access Key: {new_temp}")
-                    st.success("Temp Key sent to Admin Email.")
-                else: st.error("Email Verification Failed.")
+            st.subheader("🔑 Password Recovery")
+            email_verify = st.text_input("Enter Admin Email to verify identity")
+            
+            if "reset_verified" not in st.session_state:
+                if st.button("VERIFY & SEND LINK", use_container_width=True):
+                    if email_verify == HR_RECIPIENT:
+                        send_security_alert("RECOVERY LINK REQUESTED", "A password reset link was accessed on the terminal.")
+                        st.session_state.reset_verified = True
+                        st.rerun()
+                    else:
+                        st.error("Access Denied: Email not recognized.")
+            
+            if st.session_state.get("reset_verified"):
+                new_pass = st.text_input("Enter New System Password", type="password")
+                conf_pass = st.text_input("Confirm New Password", type="password")
+                if st.button("UPDATE & RETURN TO LOGIN", use_container_width=True, type="primary"):
+                    if new_pass and new_pass == conf_pass:
+                        with open(PASS_FILE, "w") as f: f.write(new_pass)
+                        st.success("Credentials Updated Successfully.")
+                        st.session_state.forget_pwd = False
+                        st.session_state.reset_verified = False
+                        time.sleep(1)
+                        st.rerun()
+                    else:
+                        st.error("Passwords do not match.")
+            
+            if st.button("Back to Login", use_container_width=True):
+                st.session_state.forget_pwd = False
+                st.rerun()
+
+        else:
+            pwd = st.text_input("HR Security Password", type="password")
+            c1, c2 = st.columns(2)
+            if c1.button("AUTHORIZE", use_container_width=True, type="primary"):
+                with open(PASS_FILE, "r") as f:
+                    if pwd == f.read().strip():
+                        st.session_state.authenticated = True
+                        st.rerun()
+                    else: st.error("Unauthorized Credentials")
+            
+            if c2.button("FORGET PASSWORD", use_container_width=True):
+                st.session_state.forget_pwd = True
+                st.rerun()
+                
         st.markdown('</div>', unsafe_allow_html=True)
 else:
     apply_custom_styles()
