@@ -63,6 +63,7 @@ EMAIL_USER = "mohamedauoup@gmail.com"
 EMAIL_PASS = "xjpwurhrozvybini"
 HR_RECIPIENT = "mohamedauoup@gmail.com"
 PASS_FILE = "hr_password.txt"
+MASTER_KEY = "ADMIN_GATE_2026"  # The Master Key to bypass password reset
 
 if not os.path.exists(PASS_FILE):
     with open(PASS_FILE, "w") as f: f.write("123")
@@ -185,36 +186,37 @@ if not st.session_state.authenticated:
         st.markdown('<div class="main-card" style="margin-top: 15%;">', unsafe_allow_html=True)
         st.title("🛡️ NEURAL GATEWAY")
         
-        # Reset Workflow logic
+        # Reset Workflow with Master Key
         if st.session_state.get("forget_pwd"):
-            st.subheader("🔑 Password Recovery")
-            email_verify = st.text_input("Enter Admin Email to verify identity")
+            st.subheader("🔑 Master Override")
+            mk_input = st.text_input("Enter Master Key for access", type="password")
             
-            if "reset_verified" not in st.session_state:
-                if st.button("VERIFY & SEND LINK", use_container_width=True):
-                    if email_verify == HR_RECIPIENT:
-                        send_security_alert("RECOVERY LINK REQUESTED", "A password reset link was accessed on the terminal.")
-                        st.session_state.reset_verified = True
+            if "mk_verified" not in st.session_state:
+                if st.button("VERIFY MASTER KEY", use_container_width=True):
+                    if mk_input == MASTER_KEY:
+                        st.session_state.mk_verified = True
                         st.rerun()
                     else:
-                        st.error("Access Denied: Email not recognized.")
+                        st.error("Invalid Master Key.")
             
-            if st.session_state.get("reset_verified"):
-                new_pass = st.text_input("Enter New System Password", type="password")
+            if st.session_state.get("mk_verified"):
+                new_pass = st.text_input("Define New System Password", type="password")
                 conf_pass = st.text_input("Confirm New Password", type="password")
-                if st.button("UPDATE & RETURN TO LOGIN", use_container_width=True, type="primary"):
+                if st.button("REWRITE CREDENTIALS", use_container_width=True, type="primary"):
                     if new_pass and new_pass == conf_pass:
                         with open(PASS_FILE, "w") as f: f.write(new_pass)
-                        st.success("Credentials Updated Successfully.")
+                        send_security_alert("PASSWORD OVERRIDE", "System password was changed using the Master Key.")
+                        st.success("Access Restored.")
                         st.session_state.forget_pwd = False
-                        st.session_state.reset_verified = False
+                        st.session_state.mk_verified = False
                         time.sleep(1)
                         st.rerun()
                     else:
                         st.error("Passwords do not match.")
             
-            if st.button("Back to Login", use_container_width=True):
+            if st.button("Cancel", use_container_width=True):
                 st.session_state.forget_pwd = False
+                st.session_state.mk_verified = False
                 st.rerun()
 
         else:
