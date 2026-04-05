@@ -120,8 +120,9 @@ class EnrollmentTransformer(VideoTransformerBase):
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         faces = self.face_cascade.detectMultiScale(gray, 1.3, 5)
         for (x, y, w, h) in faces:
+            # Color changed to (255, 0, 0) for BLUE in BGR
             cv2.rectangle(img, (x, y), (x + w, y + h), (255, 0, 0), 2)
-            cv2.putText(img, "SCANNING BIOMETRICS...", (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
+            cv2.putText(img, "NEW USER SCANNING...", (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
         return img
 
 class FaceRecognitionTransformer(VideoTransformerBase):
@@ -210,7 +211,6 @@ else:
         sid = st.text_input("Enter Target ID")
         if st.button("RUN QUERY"):
             if sid:
-                # --- FIX 1: Search Logic with Error Handling ---
                 try:
                     target_id = int(sid)
                     conn = get_db_connection()
@@ -219,12 +219,17 @@ else:
                     if not df.empty:
                         df['is_active'] = df['is_active'].apply(lambda x: "🟢 ACTIVE" if x == 1 else "🔴 TERMINATED")
                         st.dataframe(df, use_container_width=True)
-                    else: st.error("ID Not Found")
+                    else: 
+                        st.error("⚠️ No person found in the database with this ID.")
                 except ValueError:
                     st.error("Please enter a valid numeric ID")
 
     elif menu == "➕ ENROLL USER":
         st.header("👤 Biometric Enrollment")
+        # Added Live Scan Preview for the HR to confirm the "Scanning Features" are working
+        webrtc_streamer(key="enroll_view", video_transformer_factory=EnrollmentTransformer,
+                        rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]})
+        
         with st.form("enroll_form"):
             c1, c2, c3 = st.columns(3)
             with c1:
@@ -278,9 +283,16 @@ else:
             cur.execute("SELECT first_name, is_active FROM employees WHERE id=%s", (tid,))
             res = cur.fetchone()
             cur.close(); conn.close()
-            if res: st.session_state['term_target'] = {"id": tid, "name": res[0], "active": res[1]}
+            if res: 
+                st.session_state['term_target'] = {"id": tid, "name": res[0], "active": res[1]}
+            else:
+                st.error("⚠️ No person found in the database with this ID.")
+                if 'term_target' in st.session_state: del st.session_state['term_target']
+        
         if 'term_target' in st.session_state:
             target = st.session_state['term_target']
+            status_text = "Active" if target['active'] == 1 else "Terminated"
+            st.info(f"Target: {target['name']} | Current Status: {status_text}")
             if st.button("TOGGLE ACCESS", type="primary"):
                 new_s = 1 if target['active'] == 0 else 0
                 conn = get_db_connection(); cur = conn.cursor()
