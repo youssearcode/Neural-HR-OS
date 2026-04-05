@@ -63,7 +63,7 @@ EMAIL_USER = "mohamedauoup@gmail.com"
 EMAIL_PASS = "xjpwurhrozvybini"
 HR_RECIPIENT = "mohamedauoup@gmail.com"
 PASS_FILE = "hr_password.txt"
-MASTER_KEY = "ADMIN_GATE_2026"  # The Master Key to bypass password reset
+MASTER_KEY = "ADMIN_GATE_2026"
 
 if not os.path.exists(PASS_FILE):
     with open(PASS_FILE, "w") as f: f.write("123")
@@ -104,7 +104,7 @@ def send_security_alert(subject, body):
         return True
     except: return False
 
-# --- 5. TRANSFORMERS (OPTIMIZED FOR HIGH SPEED) ---
+# --- 5. TRANSFORMERS ---
 class EnrollmentTransformer(VideoTransformerBase):
     def __init__(self):
         self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
@@ -186,53 +186,33 @@ if not st.session_state.authenticated:
         st.markdown('<div class="main-card" style="margin-top: 15%;">', unsafe_allow_html=True)
         st.title("🛡️ NEURAL GATEWAY")
         
-        # Reset Workflow with Master Key
-        if st.session_state.get("forget_pwd"):
-            st.subheader("🔑 Master Override")
-            mk_input = st.text_input("Enter Master Key for access", type="password")
+        # Standard Login
+        pwd = st.text_input("HR Security Password", type="password")
+        if st.button("AUTHORIZE ACCESS", use_container_width=True, type="primary"):
+            with open(PASS_FILE, "r") as f:
+                if pwd == f.read().strip():
+                    st.session_state.authenticated = True
+                    st.rerun()
+                else: st.error("Unauthorized Credentials")
+        
+        st.divider()
+        
+        # Forget Password Dropdown (Expander)
+        with st.expander("Forgot Password?"):
+            st.info("Enter Master Key to reset system access.")
+            mk_key = st.text_input("Master Key", type="password", key="reset_mk")
+            new_p = st.text_input("New System Password", type="password", key="reset_np")
+            conf_p = st.text_input("Confirm New Password", type="password", key="reset_cp")
             
-            if "mk_verified" not in st.session_state:
-                if st.button("VERIFY MASTER KEY", use_container_width=True):
-                    if mk_input == MASTER_KEY:
-                        st.session_state.mk_verified = True
-                        st.rerun()
-                    else:
-                        st.error("Invalid Master Key.")
-            
-            if st.session_state.get("mk_verified"):
-                new_pass = st.text_input("Define New System Password", type="password")
-                conf_pass = st.text_input("Confirm New Password", type="password")
-                if st.button("REWRITE CREDENTIALS", use_container_width=True, type="primary"):
-                    if new_pass and new_pass == conf_pass:
-                        with open(PASS_FILE, "w") as f: f.write(new_pass)
-                        send_security_alert("PASSWORD OVERRIDE", "System password was changed using the Master Key.")
-                        st.success("Access Restored.")
-                        st.session_state.forget_pwd = False
-                        st.session_state.mk_verified = False
-                        time.sleep(1)
-                        st.rerun()
-                    else:
-                        st.error("Passwords do not match.")
-            
-            if st.button("Cancel", use_container_width=True):
-                st.session_state.forget_pwd = False
-                st.session_state.mk_verified = False
-                st.rerun()
+            if st.button("RESET CREDENTIALS", use_container_width=True):
+                if mk_key == MASTER_KEY:
+                    if new_p and new_p == conf_p:
+                        with open(PASS_FILE, "w") as f: f.write(new_p)
+                        send_security_alert("MASTER OVERRIDE", "The system password was reset via Master Key.")
+                        st.success("Password Updated. You can now login.")
+                    else: st.error("Passwords do not match.")
+                else: st.error("Invalid Master Key.")
 
-        else:
-            pwd = st.text_input("HR Security Password", type="password")
-            c1, c2 = st.columns(2)
-            if c1.button("AUTHORIZE", use_container_width=True, type="primary"):
-                with open(PASS_FILE, "r") as f:
-                    if pwd == f.read().strip():
-                        st.session_state.authenticated = True
-                        st.rerun()
-                    else: st.error("Unauthorized Credentials")
-            
-            if c2.button("FORGET PASSWORD", use_container_width=True):
-                st.session_state.forget_pwd = True
-                st.rerun()
-                
         st.markdown('</div>', unsafe_allow_html=True)
 else:
     apply_custom_styles()
