@@ -186,7 +186,6 @@ if not st.session_state.authenticated:
         st.markdown('<div class="main-card" style="margin-top: 15%;">', unsafe_allow_html=True)
         st.title("🛡️ NEURAL GATEWAY")
         
-        # Standard Login
         pwd = st.text_input("HR Security Password", type="password")
         if st.button("AUTHORIZE ACCESS", use_container_width=True, type="primary"):
             with open(PASS_FILE, "r") as f:
@@ -197,7 +196,6 @@ if not st.session_state.authenticated:
         
         st.divider()
         
-        # Forget Password Dropdown (Expander)
         with st.expander("Forgot Password?"):
             st.info("Enter Master Key to reset system access.")
             mk_key = st.text_input("Master Key", type="password", key="reset_mk")
@@ -236,7 +234,7 @@ else:
             if sid:
                 try:
                     conn = get_db_connection()
-                    df = pd.read_sql_query("SELECT * FROM employees WHERE id = %s", conn, params=(int(sid),))
+                    df = pd.read_sql_query("SELECT * FROM employees WHERE id = %s ORDER BY id ASC", conn, params=(int(sid),))
                     conn.close()
                     if not df.empty:
                         df['is_active'] = df['is_active'].apply(lambda x: "🟢 ACTIVE" if x == 1 else "🔴 TERMINATED")
@@ -324,8 +322,9 @@ else:
         st.header("📊 Daily Intelligence")
         today = datetime.now().strftime('%Y-%m-%d')
         conn = get_db_connection()
-        att_df = pd.read_sql_query("SELECT a.*, e.first_name FROM attendance a JOIN employees e ON a.emp_id = e.id WHERE a.date = %s", conn, params=(today,))
-        active_emp_df = pd.read_sql_query("SELECT id, first_name FROM employees WHERE is_active = 1", conn)
+        # Ensure ID 1+ logic via ORDER BY
+        att_df = pd.read_sql_query("SELECT a.*, e.first_name FROM attendance a JOIN employees e ON a.emp_id = e.id WHERE a.date = %s ORDER BY a.emp_id ASC", conn, params=(today,))
+        active_emp_df = pd.read_sql_query("SELECT id, first_name FROM employees WHERE is_active = 1 ORDER BY id ASC", conn)
         conn.close()
         
         st.subheader(f"Log for {today}")
@@ -354,5 +353,8 @@ else:
             st.error("Active staff purged from database."); st.rerun()
 
         if c4.button("📧 DISPATCH TO HR", use_container_width=True):
-            if send_security_alert("DAILY DISPATCH", f"Total present today: {len(att_df)}"):
-                st.success("Sent to HR Email.")
+            # Formulating body with IDs
+            id_list = "\n".join([f"ID {row['emp_id']}: {row['name']}" for _, row in att_df.iterrows()])
+            body_content = f"Total present today: {len(att_df)}\n\nPRESENT PERSONNEL LOG:\n{id_list}"
+            if send_security_alert("DAILY DISPATCH", body_content):
+                st.success("Log with IDs sent to HR Email.")
