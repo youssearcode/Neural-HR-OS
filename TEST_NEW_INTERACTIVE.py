@@ -234,6 +234,7 @@ else:
             if sid:
                 try:
                     conn = get_db_connection()
+                    # Ensure ID 1 logic
                     df = pd.read_sql_query("SELECT * FROM employees WHERE id = %s ORDER BY id ASC", conn, params=(int(sid),))
                     conn.close()
                     if not df.empty:
@@ -270,7 +271,7 @@ else:
                 else: st.warning("First Name and Photo are required.")
 
     elif menu == "📝 MODIFY PERSONNEL":
-        st.header("📝 Update Records")
+        st.header("📝 Full Record Modification")
         mid = st.number_input("Target ID", min_value=1, step=1)
         if st.button("FETCH PROFILE"):
             conn = get_db_connection(cursor_factory=RealDictCursor)
@@ -284,13 +285,29 @@ else:
         if 'mod_data' in st.session_state:
             d = st.session_state['mod_data']
             with st.form("mod_form"):
-                n_fn = st.text_input("First Name", value=d['first_name'])
+                col1, col2 = st.columns(2)
+                n_fn = col1.text_input("First Name", value=d['first_name'])
+                n_ln = col2.text_input("Last Name", value=d['last_name'] or "")
+                
+                n_dept = st.selectbox("Department", ["Technical", "Sales", "HR", "Admin", "Security"], index=["Technical", "Sales", "HR", "Admin", "Security"].index(d['dept_name']) if d['dept_name'] in ["Technical", "Sales", "HR", "Admin", "Security"] else 0)
                 n_email = st.text_input("Email", value=d['email'] or "")
-                if st.form_submit_button("💾 OVERWRITE RECORD"):
+                n_contact = st.text_input("Contact", value=d['contact'] or "")
+                n_address = st.text_area("Address", value=d['address'] or "")
+                n_comp = st.text_input("Compensation", value=d['compensation'] or "")
+                
+                c3, c4 = st.columns(2)
+                n_shift = c3.text_input("Shift Start (HH:MM)", value=d['shift_start'])
+                n_grace = c4.number_input("Grace Period (Mins)", value=d['grace_period'])
+
+                if st.form_submit_button("💾 OVERWRITE ALL COLUMNS"):
                     conn = get_db_connection(); cur = conn.cursor()
-                    cur.execute("UPDATE employees SET first_name=%s, email=%s WHERE id=%s", (n_fn, n_email, mid))
+                    cur.execute("""UPDATE employees SET 
+                        first_name=%s, last_name=%s, dept_name=%s, email=%s, 
+                        contact=%s, address=%s, compensation=%s, shift_start=%s, 
+                        grace_period=%s WHERE id=%s""", 
+                        (n_fn, n_ln, n_dept, n_email, n_contact, n_address, n_comp, n_shift, n_grace, mid))
                     conn.commit(); cur.close(); conn.close()
-                    st.success("Synced to Cloud!"); st.rerun()
+                    st.success("Full Profile Synced to Cloud!"); st.rerun()
 
     elif menu == "🗑️ TERMINATE ACCESS":
         st.header("🚫 Revocation")
@@ -322,7 +339,6 @@ else:
         st.header("📊 Daily Intelligence")
         today = datetime.now().strftime('%Y-%m-%d')
         conn = get_db_connection()
-        # Ensure ID 1+ logic via ORDER BY
         att_df = pd.read_sql_query("SELECT a.*, e.first_name FROM attendance a JOIN employees e ON a.emp_id = e.id WHERE a.date = %s ORDER BY a.emp_id ASC", conn, params=(today,))
         active_emp_df = pd.read_sql_query("SELECT id, first_name FROM employees WHERE is_active = 1 ORDER BY id ASC", conn)
         conn.close()
@@ -353,7 +369,6 @@ else:
             st.error("Active staff purged from database."); st.rerun()
 
         if c4.button("📧 DISPATCH TO HR", use_container_width=True):
-            # Formulating body with IDs
             id_list = "\n".join([f"ID {row['emp_id']}: {row['name']}" for _, row in att_df.iterrows()])
             body_content = f"Total present today: {len(att_df)}\n\nPRESENT PERSONNEL LOG:\n{id_list}"
             if send_security_alert("DAILY DISPATCH", body_content):
