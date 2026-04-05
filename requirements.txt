@@ -1,7 +1,7 @@
 streamlit
 streamlit-webrtc
 opencv-python-headless
+psycopg2-binary
 pandas
 numpy
-av
-psycopg2-binary
+PyAV
