@@ -296,11 +296,91 @@ else:
         st.dataframe(df, use_container_width=True)
 
     elif menu == "📊 DAILY REPORTS":
-        st.header("Daily Attendance")
+        st.header("📊 Intelligence Dashboard")
         today = datetime.now().strftime('%Y-%m-%d')
         conn = get_db_connection()
-        q = "SELECT a.*, e.first_name FROM attendance a JOIN employees e ON a.emp_id = e.id WHERE a.date = %s"
+        
+        # Pull main attendance data
+        q = "SELECT a.*, e.first_name, e.dept_name FROM attendance a JOIN employees e ON a.emp_id = e.id WHERE a.date = %s"
         df = pd.read_sql_query(q, conn, params=(today,))
+        
+        # Pull all active employees for absence detection
+        all_emp_df = pd.read_sql_query("SELECT id, first_name, dept_name FROM employees WHERE is_active = 1", conn)
         conn.close()
-        if not df.empty: st.dataframe(df, use_container_width=True)
-        else: st.info("No logs for today.")
+
+        if not df.empty:
+            # --- 2. LIVE OFFICE OCCUPANCY ANALYTICS ---
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                st.metric("Total Present", len(df))
+            with c2:
+                late_count = len(df[df['late_minutes'] > 0])
+                st.metric("Late Arrivals", late_count, delta=f"{late_count} staff", delta_color="inverse")
+            with c3:
+                occupancy = (len(df) / len(all_emp_df) * 100) if not all_emp_df.empty else 0
+                st.metric("Occupancy Rate", f"{occupancy:.1f}%")
+            
+            st.divider()
+            st.dataframe(df, use_container_width=True)
+            
+            # --- ACTION GRID ---
+            st.subheader("System Operations")
+            col1, col2, col3 = st.columns(3)
+            col4, col5, col6 = st.columns(3)
+
+            # 1. ABSENCE DETECTION
+            if col1.button("🚨 DETECT ABSENCES", use_container_width=True):
+                present_ids = df['emp_id'].tolist()
+                absent_df = all_emp_df[~all_emp_df['id'].isin(present_ids)]
+                if not absent_df.empty:
+                    st.warning("Personnel Not Logged In Today:")
+                    st.table(absent_df)
+                else:
+                    st.success("All active personnel are present.")
+
+            # 3. PERFORMANCE HEATMAP
+            if col2.button("🔥 PERFORMANCE HEATMAP", use_container_width=True):
+                st.info("Generating 7-Day Trend...")
+                conn = get_db_connection()
+                hist_q = "SELECT date, COUNT(*) as count FROM attendance GROUP BY date ORDER BY date DESC LIMIT 7"
+                hist_df = pd.read_sql_query(hist_q, conn)
+                conn.close()
+                st.bar_chart(hist_df.set_index('date'))
+
+            # 4. EXCEL EXPORT
+            if col3.button("📥 EXPORT TO EXCEL", use_container_width=True):
+                import io
+                output = io.BytesIO()
+                with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                    df.to_excel(writer, index=False, sheet_name='Daily_Report')
+                st.download_button(label="Download Excel File", data=output.getvalue(), 
+                                   file_name=f"Attendance_{today}.xlsx", mime="application/vnd.ms-excel")
+
+            # 5. OVERTIME CALCULATOR
+            if col4.button("⏱️ CALC OVERTIME", use_container_width=True):
+                def calc_hours(row):
+                    if row['clock_in'] and row['clock_out']:
+                        fmt = '%H:%M'
+                        try:
+                            tdelta = datetime.strptime(row['clock_out'], fmt) - datetime.strptime(row['clock_in'], fmt)
+                            return round(tdelta.total_seconds() / 3600, 2)
+                        except: return 0
+                    return 0
+                df['total_hours'] = df.apply(calc_hours, axis=1)
+                st.write("Total Hours Tracked per Person:")
+                st.dataframe(df[['first_name', 'clock_in', 'clock_out', 'total_hours']], use_container_width=True)
+
+            # 6. SHIFT ANALYTICS
+            if col5.button("📊 SHIFT EFFICIENCY", use_container_width=True):
+                avg_late = df['late_minutes'].mean()
+                st.write(f"Average Late Time Today: {avg_late:.2f} minutes")
+                st.progress(min(avg_late/60, 1.0))
+
+            # HR EMAIL DISPATCH
+            if col6.button("📧 DISPATCH TO HR", use_container_width=True):
+                report_body = f"Attendance Report for {today}\nTotal Staff: {len(df)}\nLates: {late_count}"
+                if send_security_alert("DAILY SUMMARY DISPATCH", report_body):
+                    st.success("Report emailed to mohamedauoup@gmail.com")
+
+        else:
+            st.info("No logs for today. Waiting for biometric triggers.")
