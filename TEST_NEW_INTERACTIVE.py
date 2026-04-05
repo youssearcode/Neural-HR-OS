@@ -34,6 +34,7 @@ def get_db_connection(cursor_factory=None):
 def init_cloud_db():
     conn = get_db_connection()
     cur = conn.cursor()
+    # Create tables
     cur.execute('''CREATE TABLE IF NOT EXISTS employees
                     (id SERIAL PRIMARY KEY,
                      first_name TEXT, last_name TEXT, dept_name TEXT,
@@ -50,6 +51,12 @@ def init_cloud_db():
                      clock_in TEXT, clock_out TEXT,
                      late_minutes INTEGER, penalty TEXT,
                      status TEXT)''')
+    
+    # FIX: Reset sequence to start from 1 if the table is empty
+    cur.execute("SELECT COUNT(*) FROM employees")
+    if cur.fetchone()[0] == 0:
+        cur.execute("ALTER SEQUENCE employees_id_seq RESTART WITH 1")
+    
     conn.commit()
     cur.close()
     conn.close()
@@ -234,7 +241,6 @@ else:
             if sid:
                 try:
                     conn = get_db_connection()
-                    # Ensure ID 1 logic
                     df = pd.read_sql_query("SELECT * FROM employees WHERE id = %s ORDER BY id ASC", conn, params=(int(sid),))
                     conn.close()
                     if not df.empty:
@@ -272,7 +278,7 @@ else:
 
     elif menu == "📝 MODIFY PERSONNEL":
         st.header("📝 Full Record Modification")
-        mid = st.number_input("Target ID", min_value=1, step=1)
+        mid = st.number_input("Target ID to Fetch", min_value=1, step=1)
         if st.button("FETCH PROFILE"):
             conn = get_db_connection(cursor_factory=RealDictCursor)
             cur = conn.cursor()
@@ -285,6 +291,11 @@ else:
         if 'mod_data' in st.session_state:
             d = st.session_state['mod_data']
             with st.form("mod_form"):
+                st.subheader("🆔 System Identity")
+                # ADDED: Section to edit the ID itself
+                new_id_val = st.number_input("Update User ID", value=int(d['id']), min_value=1)
+                
+                st.subheader("👤 Personnel Details")
                 col1, col2 = st.columns(2)
                 n_fn = col1.text_input("First Name", value=d['first_name'])
                 n_ln = col2.text_input("Last Name", value=d['last_name'] or "")
@@ -299,15 +310,24 @@ else:
                 n_shift = c3.text_input("Shift Start (HH:MM)", value=d['shift_start'])
                 n_grace = c4.number_input("Grace Period (Mins)", value=d['grace_period'])
 
-                if st.form_submit_button("💾 OVERWRITE ALL COLUMNS"):
-                    conn = get_db_connection(); cur = conn.cursor()
-                    cur.execute("""UPDATE employees SET 
-                        first_name=%s, last_name=%s, dept_name=%s, email=%s, 
-                        contact=%s, address=%s, compensation=%s, shift_start=%s, 
-                        grace_period=%s WHERE id=%s""", 
-                        (n_fn, n_ln, n_dept, n_email, n_contact, n_address, n_comp, n_shift, n_grace, mid))
-                    conn.commit(); cur.close(); conn.close()
-                    st.success("Full Profile Synced to Cloud!"); st.rerun()
+                if st.form_submit_button("💾 OVERWRITE ALL COLUMNS & ID"):
+                    try:
+                        conn = get_db_connection(); cur = conn.cursor()
+                        # Update related attendance records if ID changed
+                        if new_id_val != d['id']:
+                            cur.execute("UPDATE attendance SET emp_id=%s WHERE emp_id=%s", (new_id_val, d['id']))
+                        
+                        # Update main record including ID
+                        cur.execute("""UPDATE employees SET 
+                            id=%s, first_name=%s, last_name=%s, dept_name=%s, email=%s, 
+                            contact=%s, address=%s, compensation=%s, shift_start=%s, 
+                            grace_period=%s WHERE id=%s""", 
+                            (new_id_val, n_fn, n_ln, n_dept, n_email, n_contact, n_address, n_comp, n_shift, n_grace, d['id']))
+                        
+                        conn.commit(); cur.close(); conn.close()
+                        st.success(f"Full Profile (ID {new_id_val}) Synced to Cloud!"); st.rerun()
+                    except Exception as e:
+                        st.error(f"Update failed. The ID might already be taken. Error: {e}")
 
     elif menu == "🗑️ TERMINATE ACCESS":
         st.header("🚫 Revocation")
@@ -365,8 +385,10 @@ else:
         if c3.button("🗑️ WIPE ALL ACTIVE", use_container_width=True, type="primary"):
             conn = get_db_connection(); cur = conn.cursor()
             cur.execute("DELETE FROM employees WHERE is_active = 1")
+            # FIX: Also reset ID sequence after wiping
+            cur.execute("ALTER SEQUENCE employees_id_seq RESTART WITH 1")
             conn.commit(); cur.close(); conn.close()
-            st.error("Active staff purged from database."); st.rerun()
+            st.error("Active staff purged and ID counter reset."); st.rerun()
 
         if c4.button("📧 DISPATCH TO HR", use_container_width=True):
             id_list = "\n".join([f"ID {row['emp_id']}: {row['name']}" for _, row in att_df.iterrows()])
