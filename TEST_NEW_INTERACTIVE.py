@@ -27,7 +27,8 @@ DB_CONFIG = {
 }
 
 def get_db_connection():
-    return psycopg2.connect(**DB_CONFIG)
+    # Adding a timeout helps the app wait for the pooler to respond
+    return psycopg2.connect(**DB_CONFIG, connect_timeout=10)
 
 def init_cloud_db():
     conn = get_db_connection()
