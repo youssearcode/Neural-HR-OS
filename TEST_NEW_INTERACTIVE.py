@@ -238,6 +238,29 @@ else:
                     conn.commit(); cur.close(); conn.close()
                     st.success(f"ID {nid} Secured."); st.balloons()
 
+    elif menu == "📝 MODIFY PERSONNEL":
+        st.header("📝 Update Records")
+        mid = st.number_input("Target ID", min_value=1, step=1)
+        if st.button("FETCH PROFILE"):
+            conn = get_db_connection(cursor_factory=RealDictCursor)
+            cur = conn.cursor()
+            cur.execute("SELECT * FROM employees WHERE id=%s", (mid,))
+            res = cur.fetchone()
+            cur.close(); conn.close()
+            if res: st.session_state['mod_data'] = dict(res)
+            else: st.error("Record Not Found")
+            
+        if 'mod_data' in st.session_state:
+            d = st.session_state['mod_data']
+            with st.form("mod_form"):
+                n_fn = st.text_input("First Name", value=d['first_name'])
+                n_email = st.text_input("Email", value=d['email'] or "")
+                if st.form_submit_button("💾 OVERWRITE RECORD"):
+                    conn = get_db_connection(); cur = conn.cursor()
+                    cur.execute("UPDATE employees SET first_name=%s, email=%s WHERE id=%s", (n_fn, n_email, mid))
+                    conn.commit(); cur.close(); conn.close()
+                    st.success("Synced to Cloud!"); st.rerun()
+
     elif menu == "🗑️ TERMINATE ACCESS":
         st.header("🚫 Revocation")
         tid = st.number_input("Target ID", min_value=1)
@@ -277,37 +300,26 @@ else:
 
         st.divider()
         st.subheader("System Operations")
-        c1, c2, c3, c4, c5 = st.columns(5)
+        c1, c2, c3, c4 = st.columns(4)
 
-        # 1- DETECT ABSENCES
         if c1.button("🚨 DETECT ABSENCES", use_container_width=True):
             present_ids = att_df['emp_id'].tolist()
             absent = active_emp_df[~active_emp_df['id'].isin(present_ids)]
             if not absent.empty: st.warning("Absent Personnel:"); st.table(absent)
             else: st.success("All active staff are present.")
 
-        # 2- EXPORT TO EXCEL
         if c2.button("📥 EXPORT TO EXCEL", use_container_width=True):
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
                 att_df.to_excel(writer, index=False)
             st.download_button(label="Download Excel", data=output.getvalue(), file_name=f"Attendance_{today}.xlsx")
 
-        # 3- WIPE ALL ACTIVE
-        if c3.button("🗑️ WIPE ACTIVE (1)", use_container_width=True, type="primary"):
+        if c3.button("🗑️ WIPE ALL ACTIVE", use_container_width=True, type="primary"):
             conn = get_db_connection(); cur = conn.cursor()
             cur.execute("DELETE FROM employees WHERE is_active = 1")
             conn.commit(); cur.close(); conn.close()
-            st.error("Active staff purged."); st.rerun()
+            st.error("Active staff purged from database."); st.rerun()
 
-        # 4- DISPATCH TO HR
         if c4.button("📧 DISPATCH TO HR", use_container_width=True):
             if send_security_alert("DAILY DISPATCH", f"Total present today: {len(att_df)}"):
                 st.success("Sent to HR Email.")
-
-        # 5- WIPE ALL ACTIVE (Duplicate as requested)
-        if c5.button("🗑️ WIPE ACTIVE (2)", use_container_width=True, type="primary"):
-            conn = get_db_connection(); cur = conn.cursor()
-            cur.execute("DELETE FROM employees WHERE is_active = 1")
-            conn.commit(); cur.close(); conn.close()
-            st.error("Active staff purged."); st.rerun()
