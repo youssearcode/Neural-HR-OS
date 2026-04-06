@@ -136,7 +136,6 @@ class FaceRecognitionTransformer(VideoTransformerBase):
 
     def mark_attendance(self, emp_id, name, shift_start, grace):
         now = datetime.now()
-        # Ensure 'current_time' captures the full 12-hour logic accurately
         today = now.strftime('%Y-%m-%d')
         current_time = now.strftime('%I:%M %p') 
         
@@ -148,16 +147,14 @@ class FaceRecognitionTransformer(VideoTransformerBase):
         if not exists:
             try:
                 fmt = '%I:%M %p'
-                # Convert both to datetime objects to compare hour + minute
-                s_dt = datetime.strptime(shift_start, fmt)
+                s_dt = datetime.strptime(shift_start.strip().upper(), fmt)
                 c_dt = datetime.strptime(current_time, fmt)
                 
-                # Difference logic
                 diff = (c_dt - s_dt).total_seconds() / 60
                 late = max(0, int(diff) - int(grace))
                 penalty = f"{late}m Late" if late > 0 else "On Time"
             except: 
-                late, penalty = 0, "N/A"
+                late, penalty = 0, "Calculation Error"
                 
             cur.execute("INSERT INTO attendance (emp_id, name, date, clock_in, late_minutes, penalty, status) VALUES (%s,%s,%s,%s,%s,%s,%s)",
                         (emp_id, name, today, current_time, late, penalty, "Office"))
@@ -207,7 +204,6 @@ def show_daily_intelligence_fragment():
         if row['clock_in'] and row['clock_out']:
             try:
                 fmt = '%I:%M %p'
-                # Re-constructing datetime for comparison to fix hour math
                 tdelta = datetime.strptime(row['clock_out'], fmt) - datetime.strptime(row['clock_in'], fmt)
                 hours, remainder = divmod(tdelta.seconds, 3600)
                 minutes = remainder // 60
@@ -306,8 +302,10 @@ else:
                 if not df.empty:
                     df['is_active'] = df['is_active'].apply(lambda x: "🟢 ACTIVE" if x == 1 else "🔴 TERMINATED")
                     st.dataframe(df, use_container_width=True)
-                else: st.error("⚠️ No person found.")
-            except: st.error("Invalid ID")
+                else: 
+                    st.error(f"❌ RECORD NOT FOUND: ID {sid} does not exist in the database.")
+            except: 
+                st.error("⚠️ Invalid input. Please enter a valid numeric ID.")
 
     elif menu == "➕ ENROLL USER":
         st.header("👤 Biometric Enrollment")
@@ -381,7 +379,11 @@ else:
             conn = get_db_connection(); cur = conn.cursor()
             cur.execute("SELECT first_name, is_active FROM employees WHERE id=%s", (tid,))
             res = cur.fetchone(); cur.close()
-            if res: st.session_state['term_target'] = {"id": tid, "name": res[0], "active": res[1]}
+            if res: 
+                st.session_state['term_target'] = {"id": tid, "name": res[0], "active": res[1]}
+            else: 
+                # ADDED LOGIC: Specific Record Not Found message for Termination module
+                st.error(f"❌ RECORD NOT FOUND: ID {tid} does not exist.")
         if 'term_target' in st.session_state:
             target = st.session_state['term_target']
             st.info(f"Target: {target['name']} | Status: {'🟢 ACTIVE' if target['active']==1 else '🔴 TERMINATED'}")
