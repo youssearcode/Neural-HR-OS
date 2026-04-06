@@ -115,6 +115,11 @@ def send_security_alert(subject, body):
         return True
     except: return False
 
+def color_active(val):
+    """Style helper for the Staff Directory"""
+    color = '#2ecc71' if val == 1 else '#e74c3c'
+    return f'background-color: {color}; color: white; font-weight: bold;'
+
 # --- 5. TRANSFORMERS ---
 class EnrollmentTransformer(VideoTransformerBase):
     def __init__(self):
@@ -329,8 +334,11 @@ else:
 
     elif menu == "📂 STAFF DIRECTORY":
         st.header("Staff Records")
-        conn = get_db_connection(); df = pd.read_sql_query("SELECT * FROM employees ORDER BY id ASC", conn)
-        st.dataframe(df, use_container_width=True)
+        conn = get_db_connection()
+        df = pd.read_sql_query("SELECT * FROM employees ORDER BY id ASC", conn)
+        # Applying the color logic to the is_active column
+        styled_df = df.style.applymap(color_active, subset=['is_active'])
+        st.dataframe(styled_df, use_container_width=True)
 
     elif menu == "📊 DAILY REPORTS":
         show_daily_intelligence_fragment()
