@@ -307,15 +307,16 @@ else:
             fn, ln = col1.text_input("First Name *"), col2.text_input("Last Name *")
             dept = st.selectbox("Department", ["Technical", "Sales", "HR", "Admin", "Security"])
             status_opt = st.selectbox("Current System Status", ["Office", "Remote", "On Leave", "Suspended"])
-            email, contact, address, comp = st.text_input("Email"), st.text_input("Contact"), st.text_area("Address"), st.text_input("Compensation")
+            email, contact, emergency = st.text_input("Email"), st.text_input("Contact"), st.text_input("Emergency Contact")
+            address, comp = st.text_area("Address"), st.text_input("Compensation")
             photo = st.camera_input("Capture Biometric ID")
             if st.form_submit_button("✨ COMMIT TO CLOUD"):
                 if fn and photo:
                     conn = get_db_connection(); cur = conn.cursor()
                     cur.execute("""INSERT INTO employees 
-                        (first_name, last_name, dept_name, current_status, email, contact, address, compensation, is_active) 
-                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,1) RETURNING id""", 
-                        (fn, ln, dept, status_opt, email, contact, address, comp))
+                        (first_name, last_name, dept_name, current_status, email, contact, emergency_contact, address, compensation, is_active) 
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,1) RETURNING id""", 
+                        (fn, ln, dept, status_opt, email, contact, emergency, address, comp))
                     nid = cur.fetchone()[0]; conn.commit(); cur.close()
                     st.success(f"ID {nid} Secured."); st.balloons()
 
@@ -342,6 +343,7 @@ else:
                 n_status = st.selectbox("System Status", ["Office", "Remote", "On Leave", "Suspended"], index=["Office", "Remote", "On Leave", "Suspended"].index(d['current_status']) if d['current_status'] in ["Office", "Remote", "On Leave", "Suspended"] else 0)
                 n_email = st.text_input("Email", value=d['email'] or "")
                 n_contact = st.text_input("Contact", value=d['contact'] or "")
+                n_emergency = st.text_input("Emergency Contact", value=d['emergency_contact'] or "")
                 n_address = st.text_area("Address", value=d['address'] or "")
                 n_comp = st.text_input("Compensation", value=d['compensation'] or "")
                 c3, c4 = st.columns(2)
@@ -355,9 +357,9 @@ else:
                             cur.execute("UPDATE attendance SET emp_id=%s WHERE emp_id=%s", (new_id_val, d['id']))
                         cur.execute("""UPDATE employees SET 
                             id=%s, first_name=%s, last_name=%s, dept_name=%s, current_status=%s, email=%s, 
-                            contact=%s, address=%s, compensation=%s, shift_start=%s, 
+                            contact=%s, emergency_contact=%s, address=%s, compensation=%s, shift_start=%s, 
                             grace_period=%s WHERE id=%s""", 
-                            (new_id_val, n_fn, n_ln, n_dept, n_status, n_email, n_contact, n_address, n_comp, n_shift, n_grace, d['id']))
+                            (new_id_val, n_fn, n_ln, n_dept, n_status, n_email, n_contact, n_emergency, n_address, n_comp, n_shift, n_grace, d['id']))
                         conn.commit(); cur.close(); st.success("Synced."); st.rerun()
                     except Exception as e: st.error(f"Error: {e}")
 
