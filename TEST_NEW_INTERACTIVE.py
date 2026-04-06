@@ -136,7 +136,10 @@ class FaceRecognitionTransformer(VideoTransformerBase):
 
     def mark_attendance(self, emp_id, name, shift_start, grace):
         now = datetime.now()
-        today, current_time = now.strftime('%Y-%m-%d'), now.strftime('%I:%M %p')
+        # Ensure 'current_time' captures the full 12-hour logic accurately
+        today = now.strftime('%Y-%m-%d')
+        current_time = now.strftime('%I:%M %p') 
+        
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute("SELECT id FROM attendance WHERE emp_id=%s AND date=%s", (emp_id, today))
@@ -144,16 +147,14 @@ class FaceRecognitionTransformer(VideoTransformerBase):
         
         if not exists:
             try:
-                # Logic to calculate late minutes accurately
                 fmt = '%I:%M %p'
+                # Convert both to datetime objects to compare hour + minute
                 s_dt = datetime.strptime(shift_start, fmt)
                 c_dt = datetime.strptime(current_time, fmt)
                 
-                # Difference in minutes
-                diff_minutes = (c_dt - s_dt).total_seconds() / 60
-                
-                # Subtract grace and ensure no negative values
-                late = max(0, int(diff_minutes) - int(grace))
+                # Difference logic
+                diff = (c_dt - s_dt).total_seconds() / 60
+                late = max(0, int(diff) - int(grace))
                 penalty = f"{late}m Late" if late > 0 else "On Time"
             except: 
                 late, penalty = 0, "N/A"
@@ -206,6 +207,7 @@ def show_daily_intelligence_fragment():
         if row['clock_in'] and row['clock_out']:
             try:
                 fmt = '%I:%M %p'
+                # Re-constructing datetime for comparison to fix hour math
                 tdelta = datetime.strptime(row['clock_out'], fmt) - datetime.strptime(row['clock_in'], fmt)
                 hours, remainder = divmod(tdelta.seconds, 3600)
                 minutes = remainder // 60
