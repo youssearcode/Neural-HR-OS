@@ -199,8 +199,55 @@ def show_daily_intelligence_fragment():
     st.header("📊 Daily Intelligence")
     today = datetime.now().strftime('%Y-%m-%d')
     conn = get_db_connection()
+    
+    # 1. Main DataFrame for Active/Clocked-in People
     att_df = pd.read_sql_query("SELECT a.*, e.first_name FROM attendance a JOIN employees e ON a.emp_id = e.id WHERE a.date = %s ORDER BY a.emp_id ASC", conn, params=(today,))
+    
+    st.subheader("Attendance Log")
     st.dataframe(att_df, use_container_width=True)
+
+    # ACTION BUTTONS ROW
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        if st.button("📧 SEND TO HR", use_container_width=True):
+            if not att_df.empty:
+                body = att_df.to_string()
+                if send_security_alert(f"Daily Report {today}", body):
+                    st.success("Report Dispatched.")
+                else: st.error("Mail Server Error.")
+            else: st.warning("No data to send.")
+
+    with col2:
+        if st.button("🧹 WIPE ALL ACTIVE", use_container_width=True):
+            cur = conn.cursor()
+            cur.execute("DELETE FROM attendance WHERE date = %s", (today,))
+            conn.commit()
+            cur.close()
+            st.success("Daily logs cleared.")
+            st.rerun()
+
+    with col3:
+        if not att_df.empty:
+            buffer = io.BytesIO()
+            with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+                att_df.to_excel(writer, index=False)
+            st.download_button("📥 EXPORT TO EXCEL", data=buffer, file_name=f"Report_{today}.xlsx", mime="application/vnd.ms-excel", use_container_width=True)
+        else:
+            st.button("📥 EXPORT TO EXCEL", disabled=True, use_container_width=True)
+
+    with col4:
+        if st.button("🕵️ SHOW ABSENT", use_container_width=True):
+            absent_df = pd.read_sql_query("""
+                SELECT id, first_name, dept_name FROM employees 
+                WHERE is_active = 1 
+                AND id NOT IN (SELECT emp_id FROM attendance WHERE date = %s)
+            """, conn, params=(today,))
+            if not absent_df.empty:
+                st.write("### Absent Personnel")
+                st.dataframe(absent_df, use_container_width=True)
+            else:
+                st.info("No absences recorded today.")
 
 # --- 7. MAIN APP ROUTING ---
 if "authenticated" not in st.session_state: st.session_state.authenticated = False
@@ -251,19 +298,17 @@ else:
             conn = get_db_connection()
             df = pd.read_sql_query("SELECT * FROM employees WHERE id = %s", conn, params=(int(sid),))
             if not df.empty:
+                # INTEGRATED CIRCLE LOGIC FOR SEARCH
+                df['is_active'] = df['is_active'].apply(lambda x: "🟢 ACTIVE" if x == 1 else "🔴 TERMINATED")
                 st.dataframe(df, use_container_width=True)
             else: st.error(f"❌ RECORD NOT FOUND: ID {sid} does not exist.")
 
     elif menu == "➕ ENROLL USER":
         st.header("👤 Biometric Enrollment")
-        
-        # --- NEW: PHOTO CAPTURE FEATURE ---
         st.info("Step 1: Capture biometric sample below.")
         captured_photo = st.camera_input("Take Enrollment Photo")
-        
         st.divider()
         st.info("Step 2: Complete personnel profile.")
-        
         with st.form("enroll_form"):
             col1, col2 = st.columns(2)
             fn = col1.text_input("First Name *")
@@ -276,15 +321,12 @@ else:
             compensation = st.text_input("Compensation")
             shift = st.text_input("Shift Start (HH:MM AM/PM)", value="09:00 AM")
             grace = st.number_input("Grace Period (Mins)", value=15)
-            
             if st.form_submit_button("✨ COMMIT TO CLOUD"):
                 if fn and captured_photo:
-                    # Logic to save photo to disk (Optional: can also save to DB as BLOB)
                     folder_path = f"training_data/{fn.replace(' ', '_')}"
                     os.makedirs(folder_path, exist_ok=True)
                     with open(f"{folder_path}/profile.jpg", "wb") as f:
                         f.write(captured_photo.getbuffer())
-                    
                     conn = get_db_connection(); cur = conn.cursor()
                     cur.execute("""INSERT INTO employees 
                         (first_name, last_name, dept_name, email, contact, emergency_contact, address, compensation, shift_start, grace_period, folder_name, is_active) 
@@ -292,10 +334,8 @@ else:
                         (fn, ln, dept, email, contact, emergency, address, compensation, shift, grace, folder_path))
                     nid = cur.fetchone()[0]; conn.commit(); cur.close()
                     st.success(f"ID {nid} Secured. Biometrics Linked.")
-                elif not captured_photo:
-                    st.error("Missing Biometric Data: Please capture a photo first.")
-                else:
-                    st.error("First Name is required.")
+                elif not captured_photo: st.error("Missing Biometric Data: Please capture a photo first.")
+                else: st.error("First Name is required.")
 
     elif menu == "📝 MODIFY PERSONNEL":
         st.header("📝 Full Record Modification")
@@ -306,7 +346,6 @@ else:
             res = cur.fetchone(); cur.close()
             if res: st.session_state['mod_data'] = dict(res)
             else: st.error("Record Not Found")
-        
         if 'mod_data' in st.session_state:
             d = st.session_state['mod_data']
             with st.form("mod_form"):
@@ -350,10 +389,7 @@ else:
         st.header("Staff Records")
         conn = get_db_connection()
         df = pd.read_sql_query("SELECT * FROM employees ORDER BY id ASC", conn)
-        
-        # Displaying 1 as 🟢 and 0 as 🔴
         df['is_active'] = df['is_active'].apply(lambda x: "🟢" if x == 1 else "🔴")
-        
         st.dataframe(df, use_container_width=True)
 
     elif menu == "📊 DAILY REPORTS":
