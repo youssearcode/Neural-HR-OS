@@ -219,12 +219,29 @@ if not st.session_state.authenticated:
     with col:
         st.markdown('<div class="main-card" style="margin-top: 15%;">', unsafe_allow_html=True)
         st.title("🛡️ NEURAL GATEWAY")
+        
         pwd = st.text_input("HR Security Password", type="password")
+        
         if st.button("AUTHORIZE ACCESS", use_container_width=True, type="primary"):
             with open(PASS_FILE, "r") as f:
-                if pwd == f.read().strip(): st.session_state.authenticated = True; st.rerun()
+                stored_pass = f.read().strip()
+                if pwd == stored_pass: 
+                    st.session_state.authenticated = True
+                    st.rerun()
                 else: st.error("Unauthorized")
+        
+        # RESTORED FORGET PASSWORD LOGIC
+        if st.button("❓ FORGET PASSWORD", use_container_width=True):
+            st.info("Initiating Identity Verification...")
+            m_key = st.text_input("Enter ADMIN MASTER KEY", type="password")
+            new_p = st.text_input("Set New HR Password", type="password")
+            if st.button("RESET CONSOLE ACCESS"):
+                if m_key == MASTER_KEY:
+                    with open(PASS_FILE, "w") as f: f.write(new_p)
+                    st.success("Access Restored. Please Login.")
+                else: st.error("Master Key Refused.")
         st.markdown('</div>', unsafe_allow_html=True)
+
 else:
     apply_custom_styles()
     with st.sidebar:
