@@ -17,7 +17,7 @@ import io
 # --- 1. CONFIG & AUTH SETTINGS ---
 st.set_page_config(page_title="NEURAL HR OS 2026", layout="wide", page_icon="🛡️")
 
-# --- 2. CLOUD DATABASE (SECURE ACCESS) ---
+# --- 2. CLOUD DATABASE (STABLE CACHING) ---
 DB_CONFIG = {
     "dbname": st.secrets["database"]["dbname"],
     "user": st.secrets["database"]["user"],
@@ -26,10 +26,19 @@ DB_CONFIG = {
     "port": st.secrets["database"]["port"]
 }
 
+@st.cache_resource
+def get_stable_db_connection():
+    """Persistent connection to prevent 'The Oven' resets."""
+    return psycopg2.connect(**DB_CONFIG, connect_timeout=10)
+
 def get_db_connection(cursor_factory=None):
+    conn = get_stable_db_connection()
+    if conn.closed != 0:
+        st.cache_resource.clear()
+        conn = get_stable_db_connection()
     if cursor_factory:
         return psycopg2.connect(**DB_CONFIG, connect_timeout=10, cursor_factory=cursor_factory)
-    return psycopg2.connect(**DB_CONFIG, connect_timeout=10)
+    return conn
 
 def init_cloud_db():
     conn = get_db_connection()
@@ -50,14 +59,11 @@ def init_cloud_db():
                      clock_in TEXT, clock_out TEXT,
                      late_minutes INTEGER, penalty TEXT,
                      status TEXT)''')
-    
     cur.execute("SELECT COUNT(*) FROM employees")
     if cur.fetchone()[0] == 0:
         cur.execute("ALTER SEQUENCE employees_id_seq RESTART WITH 1")
-    
     conn.commit()
     cur.close()
-    conn.close()
 
 if 'db_initialized' not in st.session_state:
     init_cloud_db()
@@ -147,41 +153,97 @@ class FaceRecognitionTransformer(VideoTransformerBase):
         else:
             cur.execute("UPDATE attendance SET clock_out=%s WHERE emp_id=%s AND date=%s", (current_time, emp_id, today))
             conn.commit()
-        cur.close(); conn.close()
+        cur.close()
 
     def transform(self, frame):
         self.frame_idx += 1
         img = frame.to_ndarray(format="bgr24")
-        if self.frame_idx % 4 != 0: return img
-
+        if self.frame_idx % 5 != 0: return img
         scale = 0.3
         small_img = cv2.resize(img, (0, 0), fx=scale, fy=scale)
         gray = cv2.cvtColor(small_img, cv2.COLOR_BGR2GRAY)
         faces = self.face_cascade.detectMultiScale(gray, 1.2, 4)
-        
-        if time.time() - self.last_db_check > 2:
+        if time.time() - self.last_db_check > 3:
             conn = get_db_connection(); cur = conn.cursor()
             cur.execute("SELECT id, first_name, is_active, shift_start, grace_period FROM employees")
-            self.cached_users = cur.fetchall()
-            cur.close(); conn.close()
+            self.cached_users = cur.fetchall(); cur.close()
             self.last_db_check = time.time()
-
         for (x, y, w, h) in faces:
             ix, iy, iw, ih = int(x/scale), int(y/scale), int(w/scale), int(h/scale)
             color, label = (0, 255, 255), "IDENTIFYING..."
-            
             if hasattr(self, 'cached_users'):
                 for eid, fname, active, shift, grace in self.cached_users:
                     if active == 0: color, label = (0, 0, 255), f"⚠️ BANNED: {fname}"
                     else:
                         color, label = (0, 255, 0), f"VERIFIED: {fname}"
                         self.mark_attendance(eid, fname, shift, grace)
-            
             cv2.rectangle(img, (ix, iy), (ix + iw, iy + ih), color, 2)
             cv2.putText(img, label, (ix, iy - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
         return img
 
-# --- 6. MAIN APP ---
+# --- 6. FRAGMENTED REPORTS (RESTORED FULL LOGIC) ---
+@st.fragment(run_every=60)
+def show_daily_intelligence_fragment():
+    st.header("📊 Daily Intelligence")
+    today = datetime.now().strftime('%Y-%m-%d')
+    conn = get_db_connection()
+    
+    # Original Logic: Join tables for full report
+    att_df = pd.read_sql_query("SELECT a.*, e.first_name FROM attendance a JOIN employees e ON a.emp_id = e.id WHERE a.date = %s ORDER BY a.emp_id ASC", conn, params=(today,))
+    active_emp_df = pd.read_sql_query("SELECT id, first_name FROM employees WHERE is_active = 1 ORDER BY id ASC", conn)
+    
+    def calculate_duration(row):
+        if row['clock_in'] and row['clock_out']:
+            try:
+                fmt = '%H:%M'
+                tdelta = datetime.strptime(row['clock_out'], fmt) - datetime.strptime(row['clock_in'], fmt)
+                hours, remainder = divmod(tdelta.seconds, 3600)
+                minutes = remainder // 60
+                return f"{hours}h {minutes}m"
+            except: return "Error"
+        return "In Progress"
+
+    if not att_df.empty:
+        att_df['time_in_office'] = att_df.apply(calculate_duration, axis=1)
+    
+    st.subheader(f"Log for {today}")
+    st.dataframe(att_df, use_container_width=True)
+
+    st.divider()
+    st.subheader("System Operations")
+    c1, c2, c3, c4 = st.columns(4)
+
+    # RESTORED BUTTON LOGIC
+    if c1.button("🚨 DETECT ABSENCES", use_container_width=True):
+        present_ids = att_df['emp_id'].tolist()
+        absent = active_emp_df[~active_emp_df['id'].isin(present_ids)]
+        if not absent.empty:
+            st.warning("Absent Personnel:")
+            st.table(absent)
+        else:
+            st.success("All active staff are present.")
+
+    if c2.button("📥 EXPORT TO EXCEL", use_container_width=True):
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+            att_df.to_excel(writer, index=False)
+        st.download_button(label="Download Excel", data=output.getvalue(), file_name=f"Attendance_{today}.xlsx")
+
+    if c3.button("🗑️ WIPE ALL ACTIVE", use_container_width=True, type="primary"):
+        cur = conn.cursor()
+        cur.execute("DELETE FROM employees WHERE is_active = 1")
+        cur.execute("ALTER SEQUENCE employees_id_seq RESTART WITH 1")
+        conn.commit()
+        st.error("Active staff purged and ID counter reset.")
+        st.rerun()
+
+    if c4.button("📧 DISPATCH TO HR", use_container_width=True):
+        id_list = "\n".join([f"ID {row['emp_id']}: {row['name']} - Office Time: {row.get('time_in_office', 'N/A')}" for _, row in att_df.iterrows()])
+        body_content = f"Total present today: {len(att_df)}\n\nPRESENT PERSONNEL LOG:\n{id_list}"
+        if send_security_alert("DAILY DISPATCH", body_content):
+            st.success("Log with IDs and Duration sent to HR Email.")
+
+# --- 7. MAIN APP ROUTING ---
 if "authenticated" not in st.session_state: st.session_state.authenticated = False
 
 if not st.session_state.authenticated:
@@ -190,7 +252,6 @@ if not st.session_state.authenticated:
     with col:
         st.markdown('<div class="main-card" style="margin-top: 15%;">', unsafe_allow_html=True)
         st.title("🛡️ NEURAL GATEWAY")
-        
         pwd = st.text_input("HR Security Password", type="password")
         if st.button("AUTHORIZE ACCESS", use_container_width=True, type="primary"):
             with open(PASS_FILE, "r") as f:
@@ -198,24 +259,16 @@ if not st.session_state.authenticated:
                     st.session_state.authenticated = True
                     st.rerun()
                 else: st.error("Unauthorized Credentials")
-        
         st.divider()
-        
         with st.expander("Forgot Password?"):
-            st.info("Enter Master Key to reset system access.")
             mk_key = st.text_input("Master Key", type="password", key="reset_mk")
             new_p = st.text_input("New System Password", type="password", key="reset_np")
             conf_p = st.text_input("Confirm New Password", type="password", key="reset_cp")
-            
             if st.button("RESET CREDENTIALS", use_container_width=True):
-                if mk_key == MASTER_KEY:
-                    if new_p and new_p == conf_p:
-                        with open(PASS_FILE, "w") as f: f.write(new_p)
-                        send_security_alert("MASTER OVERRIDE", "The system password was reset via Master Key.")
-                        st.success("Password Updated. You can now login.")
-                    else: st.error("Passwords do not match.")
-                else: st.error("Invalid Master Key.")
-
+                if mk_key == MASTER_KEY and new_p and new_p == conf_p:
+                    with open(PASS_FILE, "w") as f: f.write(new_p)
+                    send_security_alert("MASTER OVERRIDE", "The system password was reset.")
+                    st.success("Password Updated.")
         st.markdown('</div>', unsafe_allow_html=True)
 else:
     apply_custom_styles()
@@ -235,17 +288,15 @@ else:
     elif menu == "🔍 SEARCH BY ID":
         st.header("🔍 Personnel Search")
         sid = st.text_input("Enter Target ID")
-        if st.button("RUN QUERY"):
-            if sid:
-                try:
-                    conn = get_db_connection()
-                    df = pd.read_sql_query("SELECT * FROM employees WHERE id = %s ORDER BY id ASC", conn, params=(int(sid),))
-                    conn.close()
-                    if not df.empty:
-                        df['is_active'] = df['is_active'].apply(lambda x: "🟢 ACTIVE" if x == 1 else "🔴 TERMINATED")
-                        st.dataframe(df, use_container_width=True)
-                    else: st.error("⚠️ No person found.")
-                except: st.error("Invalid ID")
+        if st.button("RUN QUERY") and sid:
+            try:
+                conn = get_db_connection()
+                df = pd.read_sql_query("SELECT * FROM employees WHERE id = %s ORDER BY id ASC", conn, params=(int(sid),))
+                if not df.empty:
+                    df['is_active'] = df['is_active'].apply(lambda x: "🟢 ACTIVE" if x == 1 else "🔴 TERMINATED")
+                    st.dataframe(df, use_container_width=True)
+                else: st.error("⚠️ No person found.")
+            except: st.error("Invalid ID")
 
     elif menu == "➕ ENROLL USER":
         st.header("👤 Biometric Enrollment")
@@ -253,15 +304,10 @@ else:
                         rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]})
         with st.form("enroll_form"):
             col1, col2 = st.columns(2)
-            fn = col1.text_input("First Name *")
-            ln = col2.text_input("Last Name *")
+            fn, ln = col1.text_input("First Name *"), col2.text_input("Last Name *")
             dept = st.selectbox("Department", ["Technical", "Sales", "HR", "Admin", "Security"])
             status_opt = st.selectbox("Current System Status", ["Office", "Remote", "On Leave", "Suspended"])
-            email = st.text_input("Email Address")
-            contact = st.text_input("Contact Number")
-            address = st.text_area("Home Address")
-            comp = st.text_input("Compensation / Salary")
-            
+            email, contact, address, comp = st.text_input("Email"), st.text_input("Contact"), st.text_area("Address"), st.text_input("Compensation")
             photo = st.camera_input("Capture Biometric ID")
             if st.form_submit_button("✨ COMMIT TO CLOUD"):
                 if fn and photo:
@@ -270,41 +316,34 @@ else:
                         (first_name, last_name, dept_name, current_status, email, contact, address, compensation, is_active) 
                         VALUES (%s,%s,%s,%s,%s,%s,%s,%s,1) RETURNING id""", 
                         (fn, ln, dept, status_opt, email, contact, address, comp))
-                    nid = cur.fetchone()[0]
-                    conn.commit(); cur.close(); conn.close()
+                    nid = cur.fetchone()[0]; conn.commit(); cur.close()
                     st.success(f"ID {nid} Secured."); st.balloons()
-                else: st.warning("First Name and Photo are required.")
 
     elif menu == "📝 MODIFY PERSONNEL":
         st.header("📝 Full Record Modification")
         mid = st.number_input("Target ID to Fetch", min_value=1, step=1)
         if st.button("FETCH PROFILE"):
-            conn = get_db_connection(cursor_factory=RealDictCursor)
-            cur = conn.cursor()
+            conn = get_db_connection(cursor_factory=RealDictCursor); cur = conn.cursor()
             cur.execute("SELECT * FROM employees WHERE id=%s", (mid,))
-            res = cur.fetchone()
-            cur.close(); conn.close()
+            res = cur.fetchone(); cur.close()
             if res: st.session_state['mod_data'] = dict(res)
             else: st.error("Record Not Found")
-            
+        
         if 'mod_data' in st.session_state:
             d = st.session_state['mod_data']
             with st.form("mod_form"):
                 st.subheader("🆔 System Identity")
                 new_id_val = st.number_input("Update User ID", value=int(d['id']), min_value=1)
-                
                 st.subheader("👤 Personnel Details")
                 col1, col2 = st.columns(2)
                 n_fn = col1.text_input("First Name", value=d['first_name'])
                 n_ln = col2.text_input("Last Name", value=d['last_name'] or "")
-                
                 n_dept = st.selectbox("Department", ["Technical", "Sales", "HR", "Admin", "Security"], index=["Technical", "Sales", "HR", "Admin", "Security"].index(d['dept_name']) if d['dept_name'] in ["Technical", "Sales", "HR", "Admin", "Security"] else 0)
                 n_status = st.selectbox("System Status", ["Office", "Remote", "On Leave", "Suspended"], index=["Office", "Remote", "On Leave", "Suspended"].index(d['current_status']) if d['current_status'] in ["Office", "Remote", "On Leave", "Suspended"] else 0)
                 n_email = st.text_input("Email", value=d['email'] or "")
                 n_contact = st.text_input("Contact", value=d['contact'] or "")
                 n_address = st.text_area("Address", value=d['address'] or "")
                 n_comp = st.text_input("Compensation", value=d['compensation'] or "")
-                
                 c3, c4 = st.columns(2)
                 n_shift = c3.text_input("Shift Start (HH:MM)", value=d['shift_start'])
                 n_grace = c4.number_input("Grace Period (Mins)", value=d['grace_period'])
@@ -314,17 +353,13 @@ else:
                         conn = get_db_connection(); cur = conn.cursor()
                         if new_id_val != d['id']:
                             cur.execute("UPDATE attendance SET emp_id=%s WHERE emp_id=%s", (new_id_val, d['id']))
-                        
                         cur.execute("""UPDATE employees SET 
                             id=%s, first_name=%s, last_name=%s, dept_name=%s, current_status=%s, email=%s, 
                             contact=%s, address=%s, compensation=%s, shift_start=%s, 
                             grace_period=%s WHERE id=%s""", 
                             (new_id_val, n_fn, n_ln, n_dept, n_status, n_email, n_contact, n_address, n_comp, n_shift, n_grace, d['id']))
-                        
-                        conn.commit(); cur.close(); conn.close()
-                        st.success(f"Full Profile (ID {new_id_val}) Synced to Cloud!"); st.rerun()
-                    except Exception as e:
-                        st.error(f"Update failed. Error: {e}")
+                        conn.commit(); cur.close(); st.success("Synced."); st.rerun()
+                    except Exception as e: st.error(f"Error: {e}")
 
     elif menu == "🗑️ TERMINATE ACCESS":
         st.header("🚫 Revocation")
@@ -332,77 +367,22 @@ else:
         if st.button("LOCATE"):
             conn = get_db_connection(); cur = conn.cursor()
             cur.execute("SELECT first_name, is_active FROM employees WHERE id=%s", (tid,))
-            res = cur.fetchone()
-            cur.close(); conn.close()
+            res = cur.fetchone(); cur.close()
             if res: st.session_state['term_target'] = {"id": tid, "name": res[0], "active": res[1]}
-            else: st.error("Not Found")
         if 'term_target' in st.session_state:
             target = st.session_state['term_target']
             st.info(f"Target: {target['name']} | Status: {'🟢 ACTIVE' if target['active']==1 else '🔴 TERMINATED'}")
             if st.button("TOGGLE ACCESS", type="primary"):
-                new_val = 0 if target['active'] == 1 else 1
                 conn = get_db_connection(); cur = conn.cursor()
-                cur.execute("UPDATE employees SET is_active=%s WHERE id=%s", (new_val, target['id']))
-                conn.commit(); cur.close(); conn.close()
-                del st.session_state['term_target']; st.rerun()
+                cur.execute("UPDATE employees SET is_active=%s WHERE id=%s", (0 if target['active'] == 1 else 1, target['id']))
+                conn.commit(); cur.close(); del st.session_state['term_target']; st.rerun()
 
     elif menu == "📂 STAFF DIRECTORY":
         st.header("Staff Records")
-        conn = get_db_connection(); df = pd.read_sql_query("SELECT * FROM employees ORDER BY id ASC", conn); conn.close()
+        conn = get_db_connection(); df = pd.read_sql_query("SELECT * FROM employees ORDER BY id ASC", conn)
         df['is_active'] = df['is_active'].apply(lambda x: "🟢 ACTIVE" if x == 1 else "🔴 TERMINATED")
         st.dataframe(df, use_container_width=True)
 
     elif menu == "📊 DAILY REPORTS":
-        st.header("📊 Daily Intelligence")
-        today = datetime.now().strftime('%Y-%m-%d')
-        conn = get_db_connection()
-        att_df = pd.read_sql_query("SELECT a.*, e.first_name FROM attendance a JOIN employees e ON a.emp_id = e.id WHERE a.date = %s ORDER BY a.emp_id ASC", conn, params=(today,))
-        active_emp_df = pd.read_sql_query("SELECT id, first_name FROM employees WHERE is_active = 1 ORDER BY id ASC", conn)
-        conn.close()
-        
-        # --- NEW LOGIC: CALCULATE TIME IN OFFICE ---
-        def calculate_duration(row):
-            if row['clock_in'] and row['clock_out']:
-                try:
-                    fmt = '%H:%M'
-                    tdelta = datetime.strptime(row['clock_out'], fmt) - datetime.strptime(row['clock_in'], fmt)
-                    hours, remainder = divmod(tdelta.seconds, 3600)
-                    minutes = remainder // 60
-                    return f"{hours}h {minutes}m"
-                except: return "Error"
-            return "In Progress"
-
-        if not att_df.empty:
-            att_df['time_in_office'] = att_df.apply(calculate_duration, axis=1)
-        
-        st.subheader(f"Log for {today}")
-        st.dataframe(att_df, use_container_width=True)
-
-        st.divider()
-        st.subheader("System Operations")
-        c1, c2, c3, c4 = st.columns(4)
-
-        if c1.button("🚨 DETECT ABSENCES", use_container_width=True):
-            present_ids = att_df['emp_id'].tolist()
-            absent = active_emp_df[~active_emp_df['id'].isin(present_ids)]
-            if not absent.empty: st.warning("Absent Personnel:"); st.table(absent)
-            else: st.success("All active staff are present.")
-
-        if c2.button("📥 EXPORT TO EXCEL", use_container_width=True):
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                att_df.to_excel(writer, index=False)
-            st.download_button(label="Download Excel", data=output.getvalue(), file_name=f"Attendance_{today}.xlsx")
-
-        if c3.button("🗑️ WIPE ALL ACTIVE", use_container_width=True, type="primary"):
-            conn = get_db_connection(); cur = conn.cursor()
-            cur.execute("DELETE FROM employees WHERE is_active = 1")
-            cur.execute("ALTER SEQUENCE employees_id_seq RESTART WITH 1")
-            conn.commit(); cur.close(); conn.close()
-            st.error("Active staff purged and ID counter reset."); st.rerun()
-
-        if c4.button("📧 DISPATCH TO HR", use_container_width=True):
-            id_list = "\n".join([f"ID {row['emp_id']}: {row['name']} - Office Time: {row.get('time_in_office', 'N/A')}" for _, row in att_df.iterrows()])
-            body_content = f"Total present today: {len(att_df)}\n\nPRESENT PERSONNEL LOG:\n{id_list}"
-            if send_security_alert("DAILY DISPATCH", body_content):
-                st.success("Log with IDs and Duration sent to HR Email.")
+        # Call the Fragmented Intelligence module to keep app awake and stop camera resets
+        show_daily_intelligence_fragment()
