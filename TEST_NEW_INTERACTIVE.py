@@ -256,8 +256,13 @@ else:
 
     elif menu == "➕ ENROLL USER":
         st.header("👤 Biometric Enrollment")
-        st.info("Ensure the subject is centered in the frame for biometric capture.")
-        webrtc_streamer(key="enrollment", video_transformer_factory=EnrollmentTransformer, async_processing=True)
+        
+        # --- NEW: PHOTO CAPTURE FEATURE ---
+        st.info("Step 1: Capture biometric sample below.")
+        captured_photo = st.camera_input("Take Enrollment Photo")
+        
+        st.divider()
+        st.info("Step 2: Complete personnel profile.")
         
         with st.form("enroll_form"):
             col1, col2 = st.columns(2)
@@ -271,15 +276,26 @@ else:
             compensation = st.text_input("Compensation")
             shift = st.text_input("Shift Start (HH:MM AM/PM)", value="09:00 AM")
             grace = st.number_input("Grace Period (Mins)", value=15)
+            
             if st.form_submit_button("✨ COMMIT TO CLOUD"):
-                if fn:
+                if fn and captured_photo:
+                    # Logic to save photo to disk (Optional: can also save to DB as BLOB)
+                    folder_path = f"training_data/{fn.replace(' ', '_')}"
+                    os.makedirs(folder_path, exist_ok=True)
+                    with open(f"{folder_path}/profile.jpg", "wb") as f:
+                        f.write(captured_photo.getbuffer())
+                    
                     conn = get_db_connection(); cur = conn.cursor()
                     cur.execute("""INSERT INTO employees 
-                        (first_name, last_name, dept_name, email, contact, emergency_contact, address, compensation, shift_start, grace_period, is_active) 
-                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,1) RETURNING id""", 
-                        (fn, ln, dept, email, contact, emergency, address, compensation, shift, grace))
+                        (first_name, last_name, dept_name, email, contact, emergency_contact, address, compensation, shift_start, grace_period, folder_name, is_active) 
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,1) RETURNING id""", 
+                        (fn, ln, dept, email, contact, emergency, address, compensation, shift, grace, folder_path))
                     nid = cur.fetchone()[0]; conn.commit(); cur.close()
                     st.success(f"ID {nid} Secured. Biometrics Linked.")
+                elif not captured_photo:
+                    st.error("Missing Biometric Data: Please capture a photo first.")
+                else:
+                    st.error("First Name is required.")
 
     elif menu == "📝 MODIFY PERSONNEL":
         st.header("📝 Full Record Modification")
