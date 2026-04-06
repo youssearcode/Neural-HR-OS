@@ -136,19 +136,28 @@ class FaceRecognitionTransformer(VideoTransformerBase):
 
     def mark_attendance(self, emp_id, name, shift_start, grace):
         now = datetime.now()
-        # CHANGED: Use 12-hour format with AM/PM
         today, current_time = now.strftime('%Y-%m-%d'), now.strftime('%I:%M %p')
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute("SELECT id FROM attendance WHERE emp_id=%s AND date=%s", (emp_id, today))
         exists = cur.fetchone()
+        
         if not exists:
             try:
-                # CHANGED: Parse using 12-hour format for calculation
-                s_dt, c_dt = datetime.strptime(shift_start, '%I:%M %p'), datetime.strptime(current_time, '%I:%M %p')
-                late = max(0, int((c_dt - s_dt).total_seconds() / 60) - grace)
+                # Logic to calculate late minutes accurately
+                fmt = '%I:%M %p'
+                s_dt = datetime.strptime(shift_start, fmt)
+                c_dt = datetime.strptime(current_time, fmt)
+                
+                # Difference in minutes
+                diff_minutes = (c_dt - s_dt).total_seconds() / 60
+                
+                # Subtract grace and ensure no negative values
+                late = max(0, int(diff_minutes) - int(grace))
                 penalty = f"{late}m Late" if late > 0 else "On Time"
-            except: late, penalty = 0, "N/A"
+            except: 
+                late, penalty = 0, "N/A"
+                
             cur.execute("INSERT INTO attendance (emp_id, name, date, clock_in, late_minutes, penalty, status) VALUES (%s,%s,%s,%s,%s,%s,%s)",
                         (emp_id, name, today, current_time, late, penalty, "Office"))
             conn.commit()
@@ -183,21 +192,19 @@ class FaceRecognitionTransformer(VideoTransformerBase):
             cv2.putText(img, label, (ix, iy - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
         return img
 
-# --- 6. FRAGMENTED REPORTS (RESTORED FULL LOGIC) ---
+# --- 6. FRAGMENTED REPORTS ---
 @st.fragment(run_every=60)
 def show_daily_intelligence_fragment():
     st.header("📊 Daily Intelligence")
     today = datetime.now().strftime('%Y-%m-%d')
     conn = get_db_connection()
     
-    # Original Logic: Join tables for full report
     att_df = pd.read_sql_query("SELECT a.*, e.first_name FROM attendance a JOIN employees e ON a.emp_id = e.id WHERE a.date = %s ORDER BY a.emp_id ASC", conn, params=(today,))
     active_emp_df = pd.read_sql_query("SELECT id, first_name FROM employees WHERE is_active = 1 ORDER BY id ASC", conn)
     
     def calculate_duration(row):
         if row['clock_in'] and row['clock_out']:
             try:
-                # CHANGED: Parse using 12-hour format for duration calculation
                 fmt = '%I:%M %p'
                 tdelta = datetime.strptime(row['clock_out'], fmt) - datetime.strptime(row['clock_in'], fmt)
                 hours, remainder = divmod(tdelta.seconds, 3600)
@@ -216,7 +223,6 @@ def show_daily_intelligence_fragment():
     st.subheader("System Operations")
     c1, c2, c3, c4 = st.columns(4)
 
-    # RESTORED BUTTON LOGIC
     if c1.button("🚨 DETECT ABSENCES", use_container_width=True):
         present_ids = att_df['emp_id'].tolist()
         absent = active_emp_df[~active_emp_df['id'].isin(present_ids)]
@@ -268,7 +274,7 @@ if not st.session_state.authenticated:
             new_p = st.text_input("New System Password", type="password", key="reset_np")
             conf_p = st.text_input("Confirm New Password", type="password", key="reset_cp")
             if st.button("RESET CREDENTIALS", use_container_width=True):
-                if mk_key == MASTER_KEY and new_p and new_p == Salad_conf_p:
+                if mk_key == MASTER_KEY and new_p and new_p == conf_p:
                     with open(PASS_FILE, "w") as f: f.write(new_p)
                     send_security_alert("MASTER OVERRIDE", "The system password was reset.")
                     st.success("Password Updated.")
@@ -350,7 +356,6 @@ else:
                 n_address = st.text_area("Address", value=d['address'] or "")
                 n_comp = st.text_input("Compensation", value=d['compensation'] or "")
                 c3, c4 = st.columns(2)
-                # CHANGED: Label and input to reflect 12-hour format
                 n_shift = c3.text_input("Shift Start (HH:MM AM/PM)", value=d['shift_start'])
                 n_grace = c4.number_input("Grace Period (Mins)", value=d['grace_period'])
 
@@ -390,5 +395,4 @@ else:
         st.dataframe(df, use_container_width=True)
 
     elif menu == "📊 DAILY REPORTS":
-        # Call the Fragmented Intelligence module to keep app awake and stop camera resets
         show_daily_intelligence_fragment()
