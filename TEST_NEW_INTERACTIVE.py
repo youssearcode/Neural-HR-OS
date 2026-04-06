@@ -197,7 +197,7 @@ def show_daily_intelligence_fragment():
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         if st.button("📧 SEND TO HR", use_container_width=True):
-            if send_security_alert(f"Daily Report {today}", att_df.to_string()): st.success("Sent.")
+            if send_security_alert(f"Daily Report {today}", att_df.to_string()): st.success("Sent to the HR.")
     with col2:
         if st.button("🧹 WIPE ALL ACTIVE", use_container_width=True):
             cur = conn.cursor(); cur.execute("DELETE FROM attendance WHERE date = %s", (today,)); conn.commit(); cur.close(); st.rerun()
