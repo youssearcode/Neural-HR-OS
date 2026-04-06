@@ -191,25 +191,55 @@ def show_daily_intelligence_fragment():
     st.header("📊 Daily Intelligence")
     today = datetime.now().strftime('%Y-%m-%d')
     conn = get_db_connection()
+    
+    # 1. Fetch data
     att_df = pd.read_sql_query("SELECT a.*, e.first_name FROM attendance a JOIN employees e ON a.emp_id = e.id WHERE a.date = %s ORDER BY a.emp_id ASC", conn, params=(today,))
+    
+    # 2. Logic: Calculate time inside office
+    def calculate_office_time(row):
+        if row['clock_in'] and row['clock_out']:
+            fmt = '%I:%M %p'
+            try:
+                # Convert strings to datetime objects for math
+                start = datetime.strptime(row['clock_in'], fmt)
+                end = datetime.strptime(row['clock_out'], fmt)
+                diff = end - start
+                hours, remainder = divmod(diff.total_seconds(), 3600)
+                minutes = remainder // 60
+                return f"{int(hours)}h {int(minutes)}m"
+            except:
+                return "Format Error"
+        return "Still in Office"
+
+    if not att_df.empty:
+        att_df['time_inside_office'] = att_df.apply(calculate_office_time, axis=1)
+
+    # 3. Display updated dataframe
     st.dataframe(att_df, use_container_width=True)
     
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         if st.button("📧 SEND TO HR", use_container_width=True):
-            if send_security_alert(f"Daily Report {today}", att_df.to_string()): st.success("Sent to the HR.")
+            # 4. Filter only specific columns for the email
+            email_df = att_df[['emp_id', 'first_name', 'clock_in', 'clock_out']]
+            email_body = email_df.to_string(index=False)
+            
+            if send_security_alert(f"Daily Report {today}", email_body): 
+                st.success("Filtered report sent to HR.")
+    
     with col2:
         if st.button("🧹 WIPE ALL ACTIVE", use_container_width=True):
             cur = conn.cursor(); cur.execute("DELETE FROM attendance WHERE date = %s", (today,)); conn.commit(); cur.close(); st.rerun()
+    
     with col3:
         buffer = io.BytesIO()
         with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer: att_df.to_excel(writer, index=False)
         st.download_button("📥 EXPORT TO EXCEL", data=buffer, file_name=f"Report_{today}.xlsx", use_container_width=True)
+    
     with col4:
         if st.button("🕵️ SHOW ABSENT", use_container_width=True):
             absent = pd.read_sql_query("SELECT id, first_name FROM employees WHERE is_active=1 AND id NOT IN (SELECT emp_id FROM attendance WHERE date=%s)", conn, params=(today,))
             st.dataframe(absent, use_container_width=True)
-
 # --- 7. MAIN APP ROUTING ---
 if "authenticated" not in st.session_state: st.session_state.authenticated = False
 
