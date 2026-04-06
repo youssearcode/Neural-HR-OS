@@ -230,16 +230,26 @@ if not st.session_state.authenticated:
                     st.rerun()
                 else: st.error("Unauthorized")
         
-        # RESTORED FORGET PASSWORD LOGIC
-        if st.button("❓ FORGET PASSWORD", use_container_width=True):
-            st.info("Initiating Identity Verification...")
-            m_key = st.text_input("Enter ADMIN MASTER KEY", type="password")
-            new_p = st.text_input("Set New HR Password", type="password")
-            if st.button("RESET CONSOLE ACCESS"):
+        # --- FORGOT PASSWORD DROPDOWN (EXPANDER) ---
+        with st.expander("❓ Forgot Password?"):
+            st.write("Identity Verification Required")
+            m_key = st.text_input("Master Key", type="password", key="mkey_input")
+            new_hr_p = st.text_input("New HR Password", type="password", key="new_p_input")
+            confirm_hr_p = st.text_input("Confirm New HR Password", type="password", key="confirm_p_input")
+            
+            if st.button("RESET & RESTART CONSOLE"):
                 if m_key == MASTER_KEY:
-                    with open(PASS_FILE, "w") as f: f.write(new_p)
-                    st.success("Access Restored. Please Login.")
-                else: st.error("Master Key Refused.")
+                    if new_hr_p == confirm_hr_p and new_hr_p != "":
+                        with open(PASS_FILE, "w") as f: 
+                            f.write(new_hr_p)
+                        st.success("Credentials Updated. Proceed to login.")
+                        time.sleep(1)
+                        st.rerun()
+                    else:
+                        st.error("Passwords do not match or are empty.")
+                else:
+                    st.error("Master Key Refused.")
+        
         st.markdown('</div>', unsafe_allow_html=True)
 
 else:
