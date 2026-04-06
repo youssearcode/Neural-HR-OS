@@ -257,14 +257,24 @@ else:
     elif menu == "➕ ENROLL USER":
         st.header("👤 Biometric Enrollment")
         with st.form("enroll_form"):
-            fn, ln = st.text_input("First Name *"), st.text_input("Last Name *")
+            col1, col2 = st.columns(2)
+            fn = col1.text_input("First Name *")
+            ln = col2.text_input("Last Name *")
             dept = st.selectbox("Department", ["Technical", "Sales", "HR", "Admin", "Security"])
+            email = st.text_input("Email")
+            contact = st.text_input("Contact")
+            emergency = st.text_input("Emergency Contact")
+            address = st.text_area("Address")
+            compensation = st.text_input("Compensation")
             shift = st.text_input("Shift Start (HH:MM AM/PM)", value="09:00 AM")
             grace = st.number_input("Grace Period (Mins)", value=15)
             if st.form_submit_button("✨ COMMIT TO CLOUD"):
                 if fn:
                     conn = get_db_connection(); cur = conn.cursor()
-                    cur.execute("INSERT INTO employees (first_name, last_name, dept_name, shift_start, grace_period, is_active) VALUES (%s,%s,%s,%s,%s,1) RETURNING id", (fn, ln, dept, shift, grace))
+                    cur.execute("""INSERT INTO employees 
+                        (first_name, last_name, dept_name, email, contact, emergency_contact, address, compensation, shift_start, grace_period, is_active) 
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,1) RETURNING id""", 
+                        (fn, ln, dept, email, contact, emergency, address, compensation, shift, grace))
                     nid = cur.fetchone()[0]; conn.commit(); cur.close()
                     st.success(f"ID {nid} Secured.")
 
@@ -282,11 +292,22 @@ else:
             d = st.session_state['mod_data']
             with st.form("mod_form"):
                 n_fn = st.text_input("First Name", value=d['first_name'])
+                n_ln = st.text_input("Last Name", value=d['last_name'] or "")
+                n_dept = st.selectbox("Department", ["Technical", "Sales", "HR", "Admin", "Security"], index=["Technical", "Sales", "HR", "Admin", "Security"].index(d['dept_name']) if d['dept_name'] in ["Technical", "Sales", "HR", "Admin", "Security"] else 0)
+                n_email = st.text_input("Email", value=d['email'] or "")
+                n_contact = st.text_input("Contact", value=d['contact'] or "")
+                n_emergency = st.text_input("Emergency Contact", value=d['emergency_contact'] or "")
+                n_address = st.text_area("Address", value=d['address'] or "")
+                n_comp = st.text_input("Compensation", value=d['compensation'] or "")
                 n_shift = st.text_input("Shift Start", value=d['shift_start'])
                 n_grace = st.number_input("Grace Period", value=d['grace_period'])
                 if st.form_submit_button("💾 OVERWRITE"):
                     conn = get_db_connection(); cur = conn.cursor()
-                    cur.execute("UPDATE employees SET first_name=%s, shift_start=%s, grace_period=%s WHERE id=%s", (n_fn, n_shift, n_grace, d['id']))
+                    cur.execute("""UPDATE employees SET 
+                        first_name=%s, last_name=%s, dept_name=%s, email=%s, contact=%s, 
+                        emergency_contact=%s, address=%s, compensation=%s, shift_start=%s, 
+                        grace_period=%s WHERE id=%s""", 
+                        (n_fn, n_ln, n_dept, n_email, n_contact, n_emergency, n_address, n_comp, n_shift, n_grace, d['id']))
                     conn.commit(); cur.close(); st.success("Synced.")
 
     elif menu == "🗑️ TERMINATE ACCESS":
