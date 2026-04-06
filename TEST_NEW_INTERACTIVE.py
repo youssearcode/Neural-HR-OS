@@ -193,6 +193,7 @@ def show_daily_intelligence_fragment():
     conn = get_db_connection()
     att_df = pd.read_sql_query("SELECT a.*, e.first_name FROM attendance a JOIN employees e ON a.emp_id = e.id WHERE a.date = %s ORDER BY a.emp_id ASC", conn, params=(today,))
     st.dataframe(att_df, use_container_width=True)
+    
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         if st.button("📧 SEND TO HR", use_container_width=True):
@@ -228,9 +229,16 @@ else:
     apply_custom_styles()
     with st.sidebar:
         st.title("NEURAL HR OS 2026")
+        if st.button("🔒 LOCK CONSOLE", use_container_width=True):
+            st.session_state.authenticated = False
+            st.rerun()
         menu = st.radio("System Modules", ["📺 LIVE VISION", "🔍 SEARCH BY ID", "➕ ENROLL USER", "📝 MODIFY PERSONNEL", "🗑️ TERMINATE ACCESS", "📂 STAFF DIRECTORY", "📊 DAILY REPORTS"])
 
-    if menu == "🔍 SEARCH BY ID":
+    if menu == "📺 LIVE VISION":
+        st.header("Gateway Security Feed")
+        webrtc_streamer(key="vision", video_transformer_factory=FaceRecognitionTransformer, async_processing=True)
+
+    elif menu == "🔍 SEARCH BY ID":
         st.header("🔍 Personnel Search")
         sid = st.text_input("Enter Target ID")
         if st.button("RUN QUERY") and sid:
@@ -243,41 +251,86 @@ else:
 
     elif menu == "➕ ENROLL USER":
         st.header("👤 Biometric Enrollment")
-        
-        # STEP 1
         st.subheader("Step 1 - Scanning Biometric")
         webrtc_streamer(key="enroll_scan", video_transformer_factory=EnrollmentTransformer)
-        
         st.divider()
-        
-        # STEP 2
         st.subheader("Step 2 - Complete Personnel Profile")
         with st.form("enroll_form"):
-            fn = st.text_input("First Name *")
-            ln = st.text_input("Last Name *")
+            colA, colB = st.columns(2)
+            fn = colA.text_input("First Name *")
+            ln = colB.text_input("Last Name *")
             dept = st.selectbox("Department", ["Technical", "Sales", "HR", "Admin", "Security"])
             email = st.text_input("Email")
             contact = st.text_input("Contact")
+            emergency = st.text_input("Emergency Contact")
+            address = st.text_area("Address")
             comp = st.text_input("Compensation")
             shift = st.text_input("Shift Start", value="09:00 AM")
-            grace = st.number_input("Grace Period", value=15)
-            
+            grace = st.number_input("Grace Period (Mins)", value=15)
             st.divider()
-            
-            # STEP 3
             st.subheader("Step 3 - Capture Biometric Sample Below")
             captured_photo = st.camera_input("📸 CLICK TO CAPTURE")
-            
             if st.form_submit_button("✨ COMMIT TO CLOUD"):
                 if fn and captured_photo:
                     folder = f"training_data/{fn.replace(' ', '_')}"
                     os.makedirs(folder, exist_ok=True)
                     with open(f"{folder}/profile.jpg", "wb") as f: f.write(captured_photo.getbuffer())
                     conn = get_db_connection(); cur = conn.cursor()
-                    cur.execute("INSERT INTO employees (first_name, last_name, dept_name, email, contact, compensation, shift_start, grace_period, folder_name, is_active) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,1) RETURNING id", (fn, ln, dept, email, contact, comp, shift, grace, folder))
+                    cur.execute("""INSERT INTO employees 
+                        (first_name, last_name, dept_name, email, contact, emergency_contact, address, compensation, shift_start, grace_period, folder_name, is_active) 
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,1) RETURNING id""", 
+                        (fn, ln, dept, email, contact, emergency, address, comp, shift, grace, folder))
                     nid = cur.fetchone()[0]; conn.commit(); cur.close()
                     st.success(f"ID {nid} SECURED.")
-                else: st.error("Missing First Name or Photo.")
+                else: st.error("Missing First Name or Photo Capture.")
+
+    elif menu == "📝 MODIFY PERSONNEL":
+        st.header("📝 Full Record Modification")
+        mid = st.number_input("Target ID to Fetch", min_value=1, step=1)
+        if st.button("FETCH PROFILE"):
+            conn = get_db_connection(cursor_factory=RealDictCursor); cur = conn.cursor()
+            cur.execute("SELECT * FROM employees WHERE id=%s", (mid,))
+            res = cur.fetchone(); cur.close()
+            if res: st.session_state['mod_data'] = dict(res)
+            else: st.error("Record Not Found")
+        if 'mod_data' in st.session_state:
+            d = st.session_state['mod_data']
+            with st.form("mod_form"):
+                n_fn = st.text_input("First Name", value=d['first_name'])
+                n_ln = st.text_input("Last Name", value=d['last_name'] or "")
+                n_dept = st.selectbox("Department", ["Technical", "Sales", "HR", "Admin", "Security"], index=0)
+                n_email = st.text_input("Email", value=d['email'] or "")
+                n_contact = st.text_input("Contact", value=d['contact'] or "")
+                n_emergency = st.text_input("Emergency Contact", value=d['emergency_contact'] or "")
+                n_address = st.text_area("Address", value=d['address'] or "")
+                n_comp = st.text_input("Compensation", value=d['compensation'] or "")
+                n_shift = st.text_input("Shift Start", value=d['shift_start'])
+                n_grace = st.number_input("Grace Period", value=d['grace_period'])
+                if st.form_submit_button("💾 OVERWRITE"):
+                    conn = get_db_connection(); cur = conn.cursor()
+                    cur.execute("""UPDATE employees SET 
+                        first_name=%s, last_name=%s, dept_name=%s, email=%s, contact=%s, 
+                        emergency_contact=%s, address=%s, compensation=%s, shift_start=%s, 
+                        grace_period=%s WHERE id=%s""", 
+                        (n_fn, n_ln, n_dept, n_email, n_contact, n_emergency, n_address, n_comp, n_shift, n_grace, d['id']))
+                    conn.commit(); cur.close(); st.success("Synced.")
+
+    elif menu == "🗑️ TERMINATE ACCESS":
+        st.header("🚫 Revocation")
+        tid = st.number_input("Target ID", min_value=1)
+        if st.button("LOCATE"):
+            conn = get_db_connection(); cur = conn.cursor()
+            cur.execute("SELECT first_name, is_active FROM employees WHERE id=%s", (tid,))
+            res = cur.fetchone(); cur.close()
+            if res: st.session_state['term_target'] = {"id": tid, "name": res[0], "active": res[1]}
+            else: st.error("Record Not Found")
+        if 'term_target' in st.session_state:
+            target = st.session_state['term_target']
+            st.info(f"Target: {target['name']} | Status: {'🟢 ACTIVE' if target['active']==1 else '🔴 TERMINATED'}")
+            if st.button("TOGGLE ACCESS", type="primary"):
+                conn = get_db_connection(); cur = conn.cursor()
+                cur.execute("UPDATE employees SET is_active=%s WHERE id=%s", (0 if target['active'] == 1 else 1, target['id']))
+                conn.commit(); cur.close(); del st.session_state['term_target']; st.rerun()
 
     elif menu == "📂 STAFF DIRECTORY":
         st.header("Staff Records")
