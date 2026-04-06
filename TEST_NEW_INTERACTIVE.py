@@ -8,7 +8,7 @@ from psycopg2.extras import RealDictCursor
 import pandas as pd
 import numpy as np
 import base64
-from datetime import datetime
+from datetime import datetime, time as dt_time
 import smtplib
 from email.mime.text import MIMEText
 import time
@@ -163,19 +163,16 @@ class FaceRecognitionTransformer(VideoTransformerBase):
         self.frame_idx += 1
         img = frame.to_ndarray(format="bgr24")
         if self.frame_idx % 5 != 0: return img
-        
         scale = 0.3
         small_img = cv2.resize(img, (0, 0), fx=scale, fy=scale)
         gray = cv2.cvtColor(small_img, cv2.COLOR_BGR2GRAY)
         faces = self.face_cascade.detectMultiScale(gray, 1.2, 4)
-        
         if time.time() - self.last_db_check > 3:
             conn = get_db_connection(); cur = conn.cursor()
             cur.execute("SELECT id, first_name, is_active, shift_start, grace_period FROM employees")
-            self.cached_users = cur.fetchall()
-            cur.close()
+            self.cached_users = cur.fetchall(); cur.close()
             self.last_db_check = time.time()
-            
+        
         for (x, y, w, h) in faces:
             ix, iy, iw, ih = int(x/scale), int(y/scale), int(w/scale), int(h/scale)
             color, label = (0, 255, 255), "IDENTIFYING..."
@@ -312,13 +309,18 @@ else:
             emergency = st.text_input("Emergency Contact")
             address = st.text_area("Address")
             comp = st.text_input("Compensation")
-            shift = st.text_input("Shift Start", value="09:00 AM")
+            
+            # --- UPDATED: SELECTOR REPLACES TEXT INPUT ---
+            shift_obj = st.time_input("Shift Start Time", value=dt_time(9, 0))
             grace = st.number_input("Grace Period (Mins)", value=15)
+            
             st.divider()
             st.subheader("Step 3 - Capture Biometric Sample Below")
             captured_photo = st.camera_input("📸 CLICK TO CAPTURE")
             if st.form_submit_button("✨ COMMIT TO CLOUD"):
                 if fn and captured_photo:
+                    # CONVERT TIME OBJECT TO STRICT DB STRING
+                    formatted_shift = shift_obj.strftime('%I:%M %p')
                     folder = f"training_data/{fn.replace(' ', '_')}"
                     os.makedirs(folder, exist_ok=True)
                     with open(f"{folder}/profile.jpg", "wb") as f: f.write(captured_photo.getbuffer())
@@ -326,7 +328,7 @@ else:
                     cur.execute("""INSERT INTO employees 
                         (first_name, last_name, dept_name, email, contact, emergency_contact, address, compensation, shift_start, grace_period, folder_name, is_active) 
                         VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,1) RETURNING id""", 
-                        (fn, ln, dept, email, contact, emergency, address, comp, shift, grace, folder))
+                        (fn, ln, dept, email, contact, emergency, address, comp, formatted_shift, grace, folder))
                     nid = cur.fetchone()[0]; conn.commit(); cur.close()
                     st.success(f"ID {nid} SECURED.")
                 else: st.error("Missing First Name or Photo Capture.")
@@ -351,15 +353,24 @@ else:
                 n_emergency = st.text_input("Emergency Contact", value=d['emergency_contact'] or "")
                 n_address = st.text_area("Address", value=d['address'] or "")
                 n_comp = st.text_input("Compensation", value=d['compensation'] or "")
-                n_shift = st.text_input("Shift Start", value=d['shift_start'])
+                
+                # --- UPDATED: SELECTOR LOADS PREVIOUS DB STRING ---
+                try:
+                    default_time = datetime.strptime(d['shift_start'], '%I:%M %p').time()
+                except:
+                    default_time = dt_time(9, 0)
+                n_shift_obj = st.time_input("Shift Start Time", value=default_time)
+                
                 n_grace = st.number_input("Grace Period", value=d['grace_period'])
                 if st.form_submit_button("💾 OVERWRITE"):
+                    # RE-FORMAT TO STRING BEFORE UPDATING DB
+                    n_formatted_shift = n_shift_obj.strftime('%I:%M %p')
                     conn = get_db_connection(); cur = conn.cursor()
                     cur.execute("""UPDATE employees SET 
                         first_name=%s, last_name=%s, dept_name=%s, email=%s, contact=%s, 
                         emergency_contact=%s, address=%s, compensation=%s, shift_start=%s, 
                         grace_period=%s WHERE id=%s""", 
-                        (n_fn, n_ln, n_dept, n_email, n_contact, n_emergency, n_address, n_comp, n_shift, n_grace, d['id']))
+                        (n_fn, n_ln, n_dept, n_email, n_contact, n_emergency, n_address, n_comp, n_formatted_shift, n_grace, d['id']))
                     conn.commit(); cur.close(); st.success("Synced.")
 
     elif menu == "🗑️ TERMINATE ACCESS":
