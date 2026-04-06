@@ -28,6 +28,7 @@ DB_CONFIG = {
 
 @st.cache_resource
 def get_stable_db_connection():
+    """Persistent connection to prevent 'The Oven' resets."""
     return psycopg2.connect(**DB_CONFIG, connect_timeout=10)
 
 def get_db_connection(cursor_factory=None):
@@ -58,6 +59,9 @@ def init_cloud_db():
                      clock_in TEXT, clock_out TEXT,
                      late_minutes INTEGER DEFAULT 0, penalty TEXT,
                      status TEXT)''')
+    cur.execute("SELECT COUNT(*) FROM employees")
+    if cur.fetchone()[0] == 0:
+        cur.execute("ALTER SEQUENCE employees_id_seq RESTART WITH 1")
     conn.commit()
     cur.close()
 
@@ -100,7 +104,30 @@ def apply_custom_styles():
         .stButton>button {{ background-color: rgba(0, 210, 255, 0.3) !important; border: 1px solid #00d2ff !important; color: white !important; border-radius: 10px; }}
         </style>""", unsafe_allow_html=True)
 
+def send_security_alert(subject, body):
+    try:
+        msg = MIMEText(f"NEURAL HR OS 2026 - SECURITY LOG\nTimestamp: {datetime.now()}\n\n{body}")
+        msg['Subject'] = f"🛡️ SYSTEM ALERT: {subject}"
+        msg['From'], msg['To'] = EMAIL_USER, HR_RECIPIENT
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(EMAIL_USER, EMAIL_PASS)
+            server.send_message(msg)
+        return True
+    except: return False
+
 # --- 5. TRANSFORMERS ---
+class EnrollmentTransformer(VideoTransformerBase):
+    def __init__(self):
+        self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+    def transform(self, frame):
+        img = frame.to_ndarray(format="bgr24")
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        faces = self.face_cascade.detectMultiScale(gray, 1.3, 5)
+        for (x, y, w, h) in faces:
+            cv2.rectangle(img, (x, y), (x + w, y + h), (255, 0, 0), 2)
+            cv2.putText(img, "NEW USER SCANNING...", (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
+        return img
+
 class FaceRecognitionTransformer(VideoTransformerBase):
     def __init__(self):
         self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
@@ -122,19 +149,15 @@ class FaceRecognitionTransformer(VideoTransformerBase):
             penalty = "On Time"
             try:
                 fmt = '%I:%M %p'
-                # Robust cleaning of input string
                 clean_shift = str(shift_start).strip().upper()
                 if ":" in clean_shift:
-                    # Convert strings to datetime objects for accurate math
                     s_dt = datetime.strptime(clean_shift, fmt)
                     c_dt = datetime.strptime(current_time_str, fmt)
-                    
-                    # Logic: (Clock In - Shift Start) in minutes
                     diff_min = (c_dt - s_dt).total_seconds() / 60
                     late = max(0, int(diff_min) - int(grace))
                     penalty = f"{late}m Late" if late > 0 else "On Time"
-            except Exception as e:
-                penalty = "Fix Format"
+            except: 
+                penalty = "Format Err"
                 
             cur.execute("INSERT INTO attendance (emp_id, name, date, clock_in, late_minutes, penalty, status) VALUES (%s,%s,%s,%s,%s,%s,%s)",
                         (emp_id, name, today, current_time_str, late, penalty, "Office"))
@@ -152,16 +175,14 @@ class FaceRecognitionTransformer(VideoTransformerBase):
         small_img = cv2.resize(img, (0, 0), fx=scale, fy=scale)
         gray = cv2.cvtColor(small_img, cv2.COLOR_BGR2GRAY)
         faces = self.face_cascade.detectMultiScale(gray, 1.2, 4)
-        
         if time.time() - self.last_db_check > 3:
             conn = get_db_connection(); cur = conn.cursor()
             cur.execute("SELECT id, first_name, is_active, shift_start, grace_period FROM employees")
             self.cached_users = cur.fetchall(); cur.close()
             self.last_db_check = time.time()
-            
         for (x, y, w, h) in faces:
             ix, iy, iw, ih = int(x/scale), int(y/scale), int(w/scale), int(h/scale)
-            color, label = (0, 255, 255), "SCANNING..."
+            color, label = (0, 255, 255), "IDENTIFYING..."
             if hasattr(self, 'cached_users'):
                 for eid, fname, active, shift, grace in self.cached_users:
                     if active == 0: color, label = (0, 0, 255), f"⚠️ BANNED: {fname}"
@@ -178,10 +199,7 @@ def show_daily_intelligence_fragment():
     st.header("📊 Daily Intelligence")
     today = datetime.now().strftime('%Y-%m-%d')
     conn = get_db_connection()
-    
     att_df = pd.read_sql_query("SELECT a.*, e.first_name FROM attendance a JOIN employees e ON a.emp_id = e.id WHERE a.date = %s ORDER BY a.emp_id ASC", conn, params=(today,))
-    
-    st.subheader(f"Log for {today}")
     st.dataframe(att_df, use_container_width=True)
 
 # --- 7. MAIN APP ROUTING ---
@@ -200,6 +218,18 @@ if not st.session_state.authenticated:
                     st.session_state.authenticated = True
                     st.rerun()
                 else: st.error("Unauthorized Credentials")
+        
+        st.divider()
+        with st.expander("Forgot Password?"):
+            mk_key = st.text_input("Master Key", type="password", key="reset_mk")
+            new_p = st.text_input("New System Password", type="password", key="reset_np")
+            conf_p = st.text_input("Confirm New Password", type="password", key="reset_cp")
+            if st.button("RESET CREDENTIALS", use_container_width=True):
+                if mk_key == MASTER_KEY and new_p and new_p == conf_p:
+                    with open(PASS_FILE, "w") as f: f.write(new_p)
+                    send_security_alert("MASTER OVERRIDE", "The system password was reset.")
+                    st.success("Password Updated.")
+                else: st.error("Invalid Master Key or password mismatch.")
         st.markdown('</div>', unsafe_allow_html=True)
 else:
     apply_custom_styles()
@@ -222,8 +252,7 @@ else:
             df = pd.read_sql_query("SELECT * FROM employees WHERE id = %s", conn, params=(int(sid),))
             if not df.empty:
                 st.dataframe(df, use_container_width=True)
-            else:
-                st.error(f"❌ RECORD NOT FOUND: ID {sid} does not exist.")
+            else: st.error(f"❌ RECORD NOT FOUND: ID {sid} does not exist.")
 
     elif menu == "➕ ENROLL USER":
         st.header("👤 Biometric Enrollment")
@@ -269,6 +298,13 @@ else:
             res = cur.fetchone(); cur.close()
             if res: st.session_state['term_target'] = {"id": tid, "name": res[0], "active": res[1]}
             else: st.error(f"❌ RECORD NOT FOUND: ID {tid} does not exist.")
+        if 'term_target' in st.session_state:
+            target = st.session_state['term_target']
+            st.info(f"Target: {target['name']} | Status: {'🟢 ACTIVE' if target['active']==1 else '🔴 TERMINATED'}")
+            if st.button("TOGGLE ACCESS", type="primary"):
+                conn = get_db_connection(); cur = conn.cursor()
+                cur.execute("UPDATE employees SET is_active=%s WHERE id=%s", (0 if target['active'] == 1 else 1, target['id']))
+                conn.commit(); cur.close(); del st.session_state['term_target']; st.rerun()
 
     elif menu == "📂 STAFF DIRECTORY":
         st.header("Staff Records")
