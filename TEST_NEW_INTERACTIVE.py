@@ -337,7 +337,7 @@ else:
         conn = get_db_connection()
         df = pd.read_sql_query("SELECT * FROM employees ORDER BY id ASC", conn)
         # Applying the color logic to the is_active column
-        styled_df = df.style.applymap(color_active, subset=['is_active'])
+        styled_df = df.style.map(color_active, subset=['is_active'])
         st.dataframe(styled_df, use_container_width=True)
 
     elif menu == "📊 DAILY REPORTS":
