@@ -115,11 +115,6 @@ def send_security_alert(subject, body):
         return True
     except: return False
 
-def color_active(val):
-    """Style helper for the Staff Directory"""
-    color = '#2ecc71' if val == 1 else '#e74c3c'
-    return f'background-color: {color}; color: white; font-weight: bold;'
-
 # --- 5. TRANSFORMERS ---
 class EnrollmentTransformer(VideoTransformerBase):
     def __init__(self):
@@ -130,7 +125,7 @@ class EnrollmentTransformer(VideoTransformerBase):
         faces = self.face_cascade.detectMultiScale(gray, 1.3, 5)
         for (x, y, w, h) in faces:
             cv2.rectangle(img, (x, y), (x + w, y + h), (255, 0, 0), 2)
-            cv2.putText(img, "NEW USER SCANNING...", (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
+            cv2.putText(img, "SCANNING FACE...", (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
         return img
 
 class FaceRecognitionTransformer(VideoTransformerBase):
@@ -261,6 +256,9 @@ else:
 
     elif menu == "➕ ENROLL USER":
         st.header("👤 Biometric Enrollment")
+        st.info("Ensure the subject is centered in the frame for biometric capture.")
+        webrtc_streamer(key="enrollment", video_transformer_factory=EnrollmentTransformer, async_processing=True)
+        
         with st.form("enroll_form"):
             col1, col2 = st.columns(2)
             fn = col1.text_input("First Name *")
@@ -281,7 +279,7 @@ else:
                         VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,1) RETURNING id""", 
                         (fn, ln, dept, email, contact, emergency, address, compensation, shift, grace))
                     nid = cur.fetchone()[0]; conn.commit(); cur.close()
-                    st.success(f"ID {nid} Secured.")
+                    st.success(f"ID {nid} Secured. Biometrics Linked.")
 
     elif menu == "📝 MODIFY PERSONNEL":
         st.header("📝 Full Record Modification")
@@ -336,9 +334,11 @@ else:
         st.header("Staff Records")
         conn = get_db_connection()
         df = pd.read_sql_query("SELECT * FROM employees ORDER BY id ASC", conn)
-        # Applying the color logic to the is_active column
-        styled_df = df.style.map(color_active, subset=['is_active'])
-        st.dataframe(styled_df, use_container_width=True)
+        
+        # Displaying 1 as 🟢 and 0 as 🔴
+        df['is_active'] = df['is_active'].apply(lambda x: "🟢" if x == 1 else "🔴")
+        
+        st.dataframe(df, use_container_width=True)
 
     elif menu == "📊 DAILY REPORTS":
         show_daily_intelligence_fragment()
