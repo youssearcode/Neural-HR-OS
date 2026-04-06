@@ -163,15 +163,19 @@ class FaceRecognitionTransformer(VideoTransformerBase):
         self.frame_idx += 1
         img = frame.to_ndarray(format="bgr24")
         if self.frame_idx % 5 != 0: return img
+        
         scale = 0.3
         small_img = cv2.resize(img, (0, 0), fx=scale, fy=scale)
         gray = cv2.cvtColor(small_img, cv2.COLOR_BGR2GRAY)
         faces = self.face_cascade.detectMultiScale(gray, 1.2, 4)
+        
         if time.time() - self.last_db_check > 3:
             conn = get_db_connection(); cur = conn.cursor()
             cur.execute("SELECT id, first_name, is_active, shift_start, grace_period FROM employees")
-            self.cached_users = cur.fetchall(); cur.close()
+            self.cached_users = cur.fetchall()
+            cur.close()
             self.last_db_check = time.time()
+            
         for (x, y, w, h) in faces:
             ix, iy, iw, ih = int(x/scale), int(y/scale), int(w/scale), int(h/scale)
             color, label = (0, 255, 255), "IDENTIFYING..."
@@ -191,55 +195,44 @@ def show_daily_intelligence_fragment():
     st.header("📊 Daily Intelligence")
     today = datetime.now().strftime('%Y-%m-%d')
     conn = get_db_connection()
-    
-    # 1. Fetch data
     att_df = pd.read_sql_query("SELECT a.*, e.first_name FROM attendance a JOIN employees e ON a.emp_id = e.id WHERE a.date = %s ORDER BY a.emp_id ASC", conn, params=(today,))
     
-    # 2. Logic: Calculate time inside office
     def calculate_office_time(row):
         if row['clock_in'] and row['clock_out']:
             fmt = '%I:%M %p'
             try:
-                # Convert strings to datetime objects for math
                 start = datetime.strptime(row['clock_in'], fmt)
                 end = datetime.strptime(row['clock_out'], fmt)
                 diff = end - start
                 hours, remainder = divmod(diff.total_seconds(), 3600)
                 minutes = remainder // 60
                 return f"{int(hours)}h {int(minutes)}m"
-            except:
-                return "Format Error"
+            except: return "Format Error"
         return "Still in Office"
 
     if not att_df.empty:
         att_df['time_inside_office'] = att_df.apply(calculate_office_time, axis=1)
 
-    # 3. Display updated dataframe
     st.dataframe(att_df, use_container_width=True)
-    
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         if st.button("📧 SEND TO HR", use_container_width=True):
-            # 4. Filter only specific columns for the email
             email_df = att_df[['emp_id', 'first_name', 'clock_in', 'clock_out']]
             email_body = email_df.to_string(index=False)
-            
             if send_security_alert(f"Daily Report {today}", email_body): 
                 st.success("Filtered report sent to HR.")
-    
     with col2:
         if st.button("🧹 WIPE ALL ACTIVE", use_container_width=True):
             cur = conn.cursor(); cur.execute("DELETE FROM attendance WHERE date = %s", (today,)); conn.commit(); cur.close(); st.rerun()
-    
     with col3:
         buffer = io.BytesIO()
         with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer: att_df.to_excel(writer, index=False)
         st.download_button("📥 EXPORT TO EXCEL", data=buffer, file_name=f"Report_{today}.xlsx", use_container_width=True)
-    
     with col4:
         if st.button("🕵️ SHOW ABSENT", use_container_width=True):
             absent = pd.read_sql_query("SELECT id, first_name FROM employees WHERE is_active=1 AND id NOT IN (SELECT emp_id FROM attendance WHERE date=%s)", conn, params=(today,))
             st.dataframe(absent, use_container_width=True)
+
 # --- 7. MAIN APP ROUTING ---
 if "authenticated" not in st.session_state: st.session_state.authenticated = False
 
@@ -249,9 +242,7 @@ if not st.session_state.authenticated:
     with col:
         st.markdown('<div class="main-card" style="margin-top: 15%;">', unsafe_allow_html=True)
         st.title("🛡️ NEURAL GATEWAY")
-        
         pwd = st.text_input("HR Security Password", type="password")
-        
         if st.button("AUTHORIZE ACCESS", use_container_width=True, type="primary"):
             with open(PASS_FILE, "r") as f:
                 stored_pass = f.read().strip()
@@ -260,7 +251,6 @@ if not st.session_state.authenticated:
                     st.rerun()
                 else: st.error("Unauthorized")
         
-        # --- FORGOT PASSWORD DROPDOWN (EXPANDER) ---
         with st.expander("❓ Forgot Password?"):
             st.write("Identity Verification Required")
             m_key = st.text_input("Master Key", type="password", key="mkey_input")
@@ -270,16 +260,16 @@ if not st.session_state.authenticated:
             if st.button("RESET & RESTART CONSOLE"):
                 if m_key == MASTER_KEY:
                     if new_hr_p == confirm_hr_p and new_hr_p != "":
-                        with open(PASS_FILE, "w") as f: 
-                            f.write(new_hr_p)
-                        st.success("Credentials Updated. Proceed to login.")
-                        time.sleep(1)
+                        with open(PASS_FILE, "w") as f: f.write(new_hr_p)
+                        alert_body = f"CRITICAL: HR System password was reset using the Master Key.\nNew Password Set: {new_hr_p}"
+                        send_security_alert("PASSWORD RESET EXECUTED", alert_body)
+                        st.success("Credentials Updated & HR Notified. Restarting...")
+                        time.sleep(1.5)
                         st.rerun()
-                    else:
-                        st.error("Passwords do not match or are empty.")
+                    else: st.error("Passwords do not match or are empty.")
                 else:
+                    send_security_alert("SECURITY BREACH ATTEMPT", "An unauthorized attempt to reset the HR password was blocked.")
                     st.error("Master Key Refused.")
-        
         st.markdown('</div>', unsafe_allow_html=True)
 
 else:
