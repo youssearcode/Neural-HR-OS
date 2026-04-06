@@ -49,7 +49,7 @@ def init_cloud_db():
                      address TEXT, email TEXT, contact TEXT,
                      emergency_contact TEXT, compensation TEXT,
                      performance TEXT, folder_name TEXT,
-                     shift_start TEXT DEFAULT '09:00',
+                     shift_start TEXT DEFAULT '09:00 AM',
                      grace_period INTEGER DEFAULT 15,
                      current_status TEXT DEFAULT 'Office',
                      is_active INTEGER DEFAULT 1)''')
@@ -136,14 +136,16 @@ class FaceRecognitionTransformer(VideoTransformerBase):
 
     def mark_attendance(self, emp_id, name, shift_start, grace):
         now = datetime.now()
-        today, current_time = now.strftime('%Y-%m-%d'), now.strftime('%H:%M')
+        # CHANGED: Use 12-hour format with AM/PM
+        today, current_time = now.strftime('%Y-%m-%d'), now.strftime('%I:%M %p')
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute("SELECT id FROM attendance WHERE emp_id=%s AND date=%s", (emp_id, today))
         exists = cur.fetchone()
         if not exists:
             try:
-                s_dt, c_dt = datetime.strptime(shift_start, '%H:%M'), datetime.strptime(current_time, '%H:%M')
+                # CHANGED: Parse using 12-hour format for calculation
+                s_dt, c_dt = datetime.strptime(shift_start, '%I:%M %p'), datetime.strptime(current_time, '%I:%M %p')
                 late = max(0, int((c_dt - s_dt).total_seconds() / 60) - grace)
                 penalty = f"{late}m Late" if late > 0 else "On Time"
             except: late, penalty = 0, "N/A"
@@ -195,7 +197,8 @@ def show_daily_intelligence_fragment():
     def calculate_duration(row):
         if row['clock_in'] and row['clock_out']:
             try:
-                fmt = '%H:%M'
+                # CHANGED: Parse using 12-hour format for duration calculation
+                fmt = '%I:%M %p'
                 tdelta = datetime.strptime(row['clock_out'], fmt) - datetime.strptime(row['clock_in'], fmt)
                 hours, remainder = divmod(tdelta.seconds, 3600)
                 minutes = remainder // 60
@@ -265,7 +268,7 @@ if not st.session_state.authenticated:
             new_p = st.text_input("New System Password", type="password", key="reset_np")
             conf_p = st.text_input("Confirm New Password", type="password", key="reset_cp")
             if st.button("RESET CREDENTIALS", use_container_width=True):
-                if mk_key == MASTER_KEY and new_p and new_p == conf_p:
+                if mk_key == MASTER_KEY and new_p and new_p == Salad_conf_p:
                     with open(PASS_FILE, "w") as f: f.write(new_p)
                     send_security_alert("MASTER OVERRIDE", "The system password was reset.")
                     st.success("Password Updated.")
@@ -347,7 +350,8 @@ else:
                 n_address = st.text_area("Address", value=d['address'] or "")
                 n_comp = st.text_input("Compensation", value=d['compensation'] or "")
                 c3, c4 = st.columns(2)
-                n_shift = c3.text_input("Shift Start (HH:MM)", value=d['shift_start'])
+                # CHANGED: Label and input to reflect 12-hour format
+                n_shift = c3.text_input("Shift Start (HH:MM AM/PM)", value=d['shift_start'])
                 n_grace = c4.number_input("Grace Period (Mins)", value=d['grace_period'])
 
                 if st.form_submit_button("💾 OVERWRITE ALL COLUMNS & ID"):
