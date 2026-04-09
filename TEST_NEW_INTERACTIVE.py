@@ -245,8 +245,15 @@ if not st.session_state.authenticated:
                 stored_pass = f.read().strip()
                 if pwd == stored_pass: 
                     st.session_state.authenticated = True
+                    st.session_state.guest_mode = False
                     st.rerun()
                 else: st.error("Unauthorized")
+        
+        # --- ADDED GUEST LOGIN BUTTON ---
+        if st.button("🌐 DEMO ACCESS (VIEW ONLY)", use_container_width=True):
+            st.session_state.authenticated = True
+            st.session_state.guest_mode = True
+            st.rerun()
         
         with st.expander("❓ Forgot Password?"):
             st.write("Identity Verification Required")
