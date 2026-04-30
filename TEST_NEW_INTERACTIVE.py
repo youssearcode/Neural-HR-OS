@@ -269,8 +269,8 @@ else:
     elif menu == "➕ ENROLL USER":
         st.header("👤 Detailed Biometric Enrollment")
         webrtc_streamer(
-            key="vision",
-            video_processor_factory=FaceRecognitionTransformer,  # <-- NEW (Correct)
+            key="enrollment_stream",
+            video_processor_factory=EnrollmentTransformer,  # <-- NEW (Correct)
             async_processing=True,
             rtc_configuration={
                 "iceServers": [
