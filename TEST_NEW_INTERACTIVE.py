@@ -3,235 +3,247 @@ from streamlit_webrtc import webrtc_streamer, VideoTransformerBase
 import av
 import cv2
 import os
-import psycopg2
-from psycopg2.extras import RealDictCursor
+import sqlite3
 import pandas as pd
 import numpy as np
 import base64
-from datetime import datetime, time as dt_time
+from datetime import datetime
 import smtplib
 from email.mime.text import MIMEText
 import time
-import io
 
 # --- 1. CONFIG & AUTH SETTINGS ---
 st.set_page_config(page_title="NEURAL HR OS 2026", layout="wide", page_icon="🛡️")
 
-# --- 2. CLOUD DATABASE (STABLE CACHING) ---
-DB_CONFIG = {
-    "dbname": st.secrets["database"]["dbname"],
-    "user": st.secrets["database"]["user"],
-    "password": st.secrets["database"]["password"],
-    "host": st.secrets["database"]["host"],
-    "port": st.secrets["database"]["port"]
-}
+# --- 2. DATABASE & MIGRATION ---
+SQL_DB = "HR_Database.db"
 
-@st.cache_resource
-def get_stable_db_connection():
-    return psycopg2.connect(**DB_CONFIG, connect_timeout=10)
 
-def get_db_connection(cursor_factory=None):
-    conn = get_stable_db_connection()
-    if conn.closed != 0:
-        st.cache_resource.clear()
-        conn = get_stable_db_connection()
-    if cursor_factory:
-        return psycopg2.connect(**DB_CONFIG, connect_timeout=10, cursor_factory=cursor_factory)
-    return conn
+def init_sql():
+    conn = sqlite3.connect(SQL_DB)
+    conn.execute('''CREATE TABLE IF NOT EXISTS employees
+                    (
+                        id
+                        INTEGER
+                        PRIMARY
+                        KEY
+                        AUTOINCREMENT,
+                        first_name
+                        TEXT,
+                        last_name
+                        TEXT,
+                        dept_name
+                        TEXT,
+                        address
+                        TEXT,
+                        email
+                        TEXT,
+                        contact
+                        TEXT,
+                        emergency_contact
+                        TEXT,
+                        compensation
+                        TEXT,
+                        performance
+                        TEXT,
+                        folder_name
+                        TEXT,
+                        shift_start
+                        TEXT
+                        DEFAULT
+                        "09:00",
+                        grace_period
+                        INTEGER
+                        DEFAULT
+                        15,
+                        current_status
+                        TEXT
+                        DEFAULT
+                        "Office",
+                        is_active
+                        INTEGER
+                        DEFAULT
+                        1
+                    )''')
 
-def init_cloud_db():
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute('''CREATE TABLE IF NOT EXISTS employees
-                    (id SERIAL PRIMARY KEY,
-                     first_name TEXT, last_name TEXT, dept_name TEXT,
-                     address TEXT, email TEXT, contact TEXT,
-                     emergency_contact TEXT, compensation TEXT,
-                     performance TEXT, folder_name TEXT,
-                     shift_start TEXT DEFAULT '09:00 AM',
-                     grace_period INTEGER DEFAULT 15,
-                     current_status TEXT DEFAULT 'Office',
-                     is_active INTEGER DEFAULT 1)''')
-    cur.execute('''CREATE TABLE IF NOT EXISTS attendance
-                    (id SERIAL PRIMARY KEY,
-                     emp_id INTEGER, name TEXT, date TEXT,
-                     clock_in TEXT, clock_out TEXT,
-                     late_minutes INTEGER DEFAULT 0, penalty TEXT,
-                     status TEXT)''')
-    cur.execute("SELECT COUNT(*) FROM employees")
-    if cur.fetchone()[0] == 0:
-        cur.execute("ALTER SEQUENCE employees_id_seq RESTART WITH 1")
+    conn.execute('''CREATE TABLE IF NOT EXISTS attendance
+                    (
+                        id
+                        INTEGER
+                        PRIMARY
+                        KEY
+                        AUTOINCREMENT,
+                        emp_id
+                        INTEGER,
+                        name
+                        TEXT,
+                        date
+                        TEXT,
+                        clock_in
+                        TEXT,
+                        clock_out
+                        TEXT,
+                        late_minutes
+                        INTEGER,
+                        penalty
+                        TEXT,
+                        status
+                        TEXT
+                    )''')
+
+    cursor = conn.execute("PRAGMA table_info(employees)")
+    columns = [column[1] for column in cursor.fetchall()]
+    if "is_active" not in columns:
+        try:
+            conn.execute("ALTER TABLE employees ADD COLUMN is_active INTEGER DEFAULT 1")
+            st.toast("Database Migrated: Added 'is_active' column.")
+        except:
+            pass
+
     conn.commit()
-    cur.close()
+    conn.close()
 
-if 'db_initialized' not in st.session_state:
-    init_cloud_db()
-    st.session_state.db_initialized = True
+
+init_sql()
 
 # --- 3. SYSTEM GLOBALS ---
 EMAIL_USER = "mohamedauoup@gmail.com"
 EMAIL_PASS = "xjpwurhrozvybini"
 HR_RECIPIENT = "mohamedauoup@gmail.com"
 PASS_FILE = "hr_password.txt"
-MASTER_KEY = "ADMIN_GATE_2026"
+MASTER_KEY = "1234567"
+#DB_PATH = r"G:\Training Data"
+DB_PATH = "attendance_data"
 
 if not os.path.exists(PASS_FILE):
     with open(PASS_FILE, "w") as f: f.write("123")
 
-# --- 4. UTILITIES ---
+
+# --- 4. CACHED VIDEO & STYLES ---
 @st.cache_data
 def get_video_base64(file_path):
     try:
         if os.path.exists(file_path):
             with open(file_path, "rb") as f: return base64.b64encode(f.read()).decode()
-    except: return None
+    except:
+        return None
+
 
 def apply_custom_styles():
     video_path = "1.mp4"
     video_base64 = get_video_base64(video_path)
     video_html = f'<video autoplay loop muted playsinline id="bg-video"><source src="data:video/mp4;base64,{video_base64}" type="video/mp4"></video>' if video_base64 else ""
-    st.markdown(f"""{video_html}<style>
-        #bg-video {{ position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; object-fit: cover; z-index: -1; }}
+
+    st.markdown(
+        f"""
+        {video_html}
+        <style>
+        #bg-video {{ 
+            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; 
+            object-fit: cover; z-index: -1; filter: brightness(1.0); opacity: 1.0;
+        }}
         .stApp {{ background: transparent !important; }}
         [data-testid="stHeader"] {{ background: transparent !important; }}
-        [data-testid="stSidebar"] {{ background-color: rgba(0, 0, 0, 0.4) !important; backdrop-filter: blur(15px); }}
+        [data-testid="stSidebar"] {{
+            background-color: rgba(0, 0, 0, 0.4) !important; 
+            backdrop-filter: blur(15px);
+        }}
         div[data-testid="stForm"], .stDataFrame, .main-card {{
-            background-color: rgba(0, 0, 0, 0.3) !important; border-radius: 15px; padding: 25px; backdrop-filter: blur(12px);
-            border: 1px solid rgba(0, 210, 255, 0.2); box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6); margin-bottom: 20px;
+            background-color: rgba(0, 0, 0, 0.3) !important; 
+            border-radius: 15px; padding: 25px; backdrop-filter: blur(12px);
+            border: 1px solid rgba(0, 210, 255, 0.2); 
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6); margin-bottom: 20px;
         }}
         h1, h2, h3, p, label, .stMarkdown {{ color: #ffffff !important; text-shadow: 1px 1px 3px rgba(0,0,0,0.8); }}
         .stButton>button {{ background-color: rgba(0, 210, 255, 0.3) !important; border: 1px solid #00d2ff !important; color: white !important; border-radius: 10px; }}
-        </style>""", unsafe_allow_html=True)
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
 
-def send_security_alert(subject, body):
+
+def send_alert_email(name):
     try:
-        msg = MIMEText(f"NEURAL HR OS 2026 - SECURITY LOG\nTimestamp: {datetime.now()}\n\n{body}")
-        msg['Subject'] = f"🛡️ SYSTEM ALERT: {subject}"
+        msg = MIMEText(
+            f"SECURITY ALERT: Terminated employee {name} detected at gateway: {datetime.now().strftime('%H:%M:%S')}")
+        msg['Subject'] = "GATEWAY VIOLATION: TERMINATED ACCESS ATTEMPT"
         msg['From'], msg['To'] = EMAIL_USER, HR_RECIPIENT
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
             server.login(EMAIL_USER, EMAIL_PASS)
             server.send_message(msg)
-        return True
-    except: return False
+    except Exception as e:
+        print(f"Email Failed: {e}")
+
 
 # --- 5. TRANSFORMERS ---
 class EnrollmentTransformer(VideoTransformerBase):
     def __init__(self):
         self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+
     def transform(self, frame):
         img = frame.to_ndarray(format="bgr24")
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         faces = self.face_cascade.detectMultiScale(gray, 1.3, 5)
         for (x, y, w, h) in faces:
-            cv2.rectangle(img, (x, y), (x + w, y + h), (0, 210, 255), 2)
-            cv2.putText(img, "SCANNING BIOMETRIC...", (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 210, 255), 2)
+            cv2.rectangle(img, (x, y), (x + w, y + h), (255, 0, 0), 2)
+            cv2.putText(img, "SCANNING BIOMETRICS...", (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
         return img
+
 
 class FaceRecognitionTransformer(VideoTransformerBase):
     def __init__(self):
         self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-        self.frame_idx = 0
-        self.last_db_check = 0
+        self.last_alert = {}
 
     def mark_attendance(self, emp_id, name, shift_start, grace):
         now = datetime.now()
-        today = now.strftime('%Y-%m-%d')
-        current_time_str = now.strftime('%I:%M %p') 
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute("SELECT id FROM attendance WHERE emp_id=%s AND date=%s", (emp_id, today))
-        if not cur.fetchone():
-            late = 0
-            penalty = "On Time"
+        today, current_time = now.strftime('%Y-%m-%d'), now.strftime('%H:%M')
+        conn = sqlite3.connect(SQL_DB)
+        exists = conn.execute("SELECT id FROM attendance WHERE emp_id=? AND date=?", (emp_id, today)).fetchone()
+        if not exists:
             try:
-                fmt = '%I:%M %p'
-                s_dt = datetime.strptime(str(shift_start).strip().upper(), fmt)
-                c_dt = datetime.strptime(current_time_str, fmt)
-                diff_min = (c_dt - s_dt).total_seconds() / 60
-                late = max(0, int(diff_min) - int(grace))
+                s_dt, c_dt = datetime.strptime(shift_start, '%H:%M'), datetime.strptime(current_time, '%H:%M')
+                late = max(0, int((c_dt - s_dt).total_seconds() / 60) - grace)
                 penalty = f"{late}m Late" if late > 0 else "On Time"
-            except: penalty = "Format Err"
-            cur.execute("INSERT INTO attendance (emp_id, name, date, clock_in, late_minutes, penalty, status) VALUES (%s,%s,%s,%s,%s,%s,%s)",
-                        (emp_id, name, today, current_time_str, late, penalty, "Office"))
+            except:
+                late, penalty = 0, "N/A"
+            conn.execute(
+                "INSERT INTO attendance (emp_id, name, date, clock_in, late_minutes, penalty, status) VALUES (?,?,?,?,?,?,?)",
+                (emp_id, name, today, current_time, late, penalty, "Office"))
             conn.commit()
         else:
-            cur.execute("UPDATE attendance SET clock_out=%s WHERE emp_id=%s AND date=%s", (current_time_str, emp_id, today))
+            conn.execute("UPDATE attendance SET clock_out=? WHERE emp_id=? AND date=?", (current_time, emp_id, today))
             conn.commit()
-        cur.close()
+        conn.close()
 
     def transform(self, frame):
-        self.frame_idx += 1
         img = frame.to_ndarray(format="bgr24")
-        if self.frame_idx % 5 != 0: return img
-        scale = 0.3
-        small_img = cv2.resize(img, (0, 0), fx=scale, fy=scale)
-        gray = cv2.cvtColor(small_img, cv2.COLOR_BGR2GRAY)
-        faces = self.face_cascade.detectMultiScale(gray, 1.2, 4)
-        if time.time() - self.last_db_check > 3:
-            conn = get_db_connection(); cur = conn.cursor()
-            cur.execute("SELECT id, first_name, is_active, shift_start, grace_period FROM employees")
-            self.cached_users = cur.fetchall(); cur.close()
-            self.last_db_check = time.time()
-        
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        faces = self.face_cascade.detectMultiScale(gray, 1.3, 5)
+
+        conn = sqlite3.connect(SQL_DB)
+        users = conn.execute("SELECT id, first_name, is_active, shift_start, grace_period FROM employees").fetchall()
+        conn.close()
+
         for (x, y, w, h) in faces:
-            ix, iy, iw, ih = int(x/scale), int(y/scale), int(w/scale), int(h/scale)
             color, label = (0, 255, 255), "IDENTIFYING..."
-            if hasattr(self, 'cached_users'):
-                for eid, fname, active, shift, grace in self.cached_users:
-                    if active == 0: color, label = (0, 0, 255), f"⚠️ BANNED: {fname}"
-                    else:
-                        color, label = (0, 255, 0), f"VERIFIED: {fname}"
-                        self.mark_attendance(eid, fname, shift, grace)
-            cv2.rectangle(img, (ix, iy), (ix + iw, iy + ih), color, 2)
-            cv2.putText(img, label, (ix, iy - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+            for eid, fname, active, shift, grace in users:
+                if active == 0:
+                    color, label = (0, 0, 255), f"⚠️ ACCESS DENIED: {fname}"
+                    if eid not in self.last_alert or (time.time() - self.last_alert[eid]) > 3600:
+                        send_alert_email(fname)
+                        self.last_alert[eid] = time.time()
+                else:
+                    color, label = (0, 255, 0), f"VERIFIED: {fname}"
+                    self.mark_attendance(eid, fname, shift, grace)
+            cv2.rectangle(img, (x, y), (x + w, y + h), color, 2)
+            cv2.putText(img, label, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
         return img
 
-# --- 6. FRAGMENTED REPORTS ---
-@st.fragment(run_every=60)
-def show_daily_intelligence_fragment():
-    st.header("📊 Daily Intelligence")
-    today = datetime.now().strftime('%Y-%m-%d')
-    conn = get_db_connection()
-    att_df = pd.read_sql_query("SELECT a.*, e.first_name FROM attendance a JOIN employees e ON a.emp_id = e.id WHERE a.date = %s ORDER BY a.emp_id ASC", conn, params=(today,))
-    
-    def calculate_office_time(row):
-        if row['clock_in'] and row['clock_out']:
-            fmt = '%I:%M %p'
-            try:
-                start = datetime.strptime(row['clock_in'], fmt)
-                end = datetime.strptime(row['clock_out'], fmt)
-                diff = end - start
-                hours, remainder = divmod(diff.total_seconds(), 3600)
-                minutes = remainder // 60
-                return f"{int(hours)}h {int(minutes)}m"
-            except: return "Format Error"
-        return "Still in Office"
 
-    if not att_df.empty:
-        att_df['time_inside_office'] = att_df.apply(calculate_office_time, axis=1)
-
-    st.dataframe(att_df, use_container_width=True)
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        if st.button("📧 SEND TO HR", use_container_width=True):
-            email_df = att_df[['emp_id', 'first_name', 'clock_in', 'clock_out']]
-            email_body = email_df.to_string(index=False)
-            if send_security_alert(f"Daily Report {today}", email_body): 
-                st.success("Filtered report sent to HR.")
-    with col2:
-        if st.button("🧹 WIPE ALL ACTIVE", use_container_width=True):
-            cur = conn.cursor(); cur.execute("DELETE FROM attendance WHERE date = %s", (today,)); conn.commit(); cur.close(); st.rerun()
-    with col3:
-        buffer = io.BytesIO()
-        with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer: att_df.to_excel(writer, index=False)
-        st.download_button("📥 EXPORT TO EXCEL", data=buffer, file_name=f"Report_{today}.xlsx", use_container_width=True)
-    with col4:
-        if st.button("🕵️ SHOW ABSENT", use_container_width=True):
-            absent = pd.read_sql_query("SELECT id, first_name FROM employees WHERE is_active=1 AND id NOT IN (SELECT emp_id FROM attendance WHERE date=%s)", conn, params=(today,))
-            st.dataframe(absent, use_container_width=True)
-
-# --- 7. MAIN APP ROUTING ---
-if "authenticated" not in st.session_state: st.session_state.authenticated = False
+# --- 6. MAIN APP LOGIC ---
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
 
 if not st.session_state.authenticated:
     apply_custom_styles()
@@ -242,40 +254,27 @@ if not st.session_state.authenticated:
         pwd = st.text_input("HR Security Password", type="password")
         if st.button("AUTHORIZE ACCESS", use_container_width=True, type="primary"):
             with open(PASS_FILE, "r") as f:
-                stored_pass = f.read().strip()
-                if pwd == stored_pass: 
+                if pwd == f.read().strip():
                     st.session_state.authenticated = True
-                    st.session_state.guest_mode = False
                     st.rerun()
-                else: st.error("Unauthorized")
-        
-        # --- ADDED GUEST LOGIN BUTTON ---
-        if st.button("🌐 DEMO ACCESS (VIEW ONLY)", use_container_width=True):
-            st.session_state.authenticated = True
-            st.session_state.guest_mode = True
-            st.rerun()
-        
-        with st.expander("❓ Forgot Password?"):
-            st.write("Identity Verification Required")
-            m_key = st.text_input("Master Key", type="password", key="mkey_input")
-            new_hr_p = st.text_input("New HR Password", type="password", key="new_p_input")
-            confirm_hr_p = st.text_input("Confirm New HR Password", type="password", key="confirm_p_input")
-            
-            if st.button("RESET & RESTART CONSOLE"):
-                if m_key == MASTER_KEY:
-                    if new_hr_p == confirm_hr_p and new_hr_p != "":
-                        with open(PASS_FILE, "w") as f: f.write(new_hr_p)
-                        alert_body = f"CRITICAL: HR System password was reset using the Master Key.\nNew Password Set: {new_hr_p}"
-                        send_security_alert("PASSWORD RESET EXECUTED", alert_body)
-                        st.success("Credentials Updated & HR Notified. Restarting...")
-                        time.sleep(1.5)
-                        st.rerun()
-                    else: st.error("Passwords do not match or are empty.")
                 else:
-                    send_security_alert("SECURITY BREACH ATTEMPT", "An unauthorized attempt to reset the HR password was blocked.")
-                    st.error("Master Key Refused.")
-        st.markdown('</div>', unsafe_allow_html=True)
+                    st.error("Unauthorized Credentials")
 
+        with st.expander("Forgot System Password?"):
+            mk = st.text_input("Master Reset Key", type="password")
+            new_p = st.text_input("New Secure Password", type="password")
+            if st.button("OVERRIDE & RESET"):
+                if not mk or not new_p:
+                    st.warning("Please provide both the Master Key and a New Password.")
+                elif mk == MASTER_KEY:
+                    with open(PASS_FILE, "w") as f:
+                        f.write(new_p)
+                    st.success("System Reset Successful. Redirecting to Login...")
+                    time.sleep(2)
+                    st.rerun()
+                else:
+                    st.error("Master Key Authentication Failed")
+        st.markdown('</div>', unsafe_allow_html=True)
 else:
     apply_custom_styles()
     with st.sidebar:
@@ -283,126 +282,198 @@ else:
         if st.button("🔒 LOCK CONSOLE", use_container_width=True):
             st.session_state.authenticated = False
             st.rerun()
-        menu = st.radio("System Modules", ["📺 LIVE VISION", "🔍 SEARCH BY ID", "➕ ENROLL USER", "📝 MODIFY PERSONNEL", "🗑️ TERMINATE ACCESS", "📂 STAFF DIRECTORY", "📊 DAILY REPORTS"])
+        st.divider()
+        menu = st.radio("System Modules", ["📺 LIVE VISION", "🔍 SEARCH BY ID", "➕ ENROLL USER", "📝 MODIFY PERSONNEL",
+                                           "🗑️ TERMINATE ACCESS", "📂 STAFF DIRECTORY", "📊 DAILY REPORTS"])
 
+    # --- MODULE: LIVE VISION ---
     if menu == "📺 LIVE VISION":
         st.header("Gateway Security Feed")
-        webrtc_streamer(key="vision", video_transformer_factory=FaceRecognitionTransformer, async_processing=True)
+        webrtc_streamer(
+            key="vision",
+            video_transformer_factory=FaceRecognitionTransformer,
+            async_processing=True,
+            rtc_configuration={
+                "iceServers": [
+                    {"urls": ["stun:stun.l.google.com:19302"]},
+                    {"urls": ["stun:stun1.l.google.com:19302"]},
+                    {"urls": ["stun:stun2.l.google.com:19302"]},
+                    {"urls": ["stun:stun3.l.google.com:19302"]},
+                    {"urls": ["stun:stun4.l.google.com:19302"]},
+                ]
+            },
+            media_stream_constraints={"video": True, "audio": False},
+        )
 
+    # --- MODULE: SEARCH BY ID ---
     elif menu == "🔍 SEARCH BY ID":
         st.header("🔍 Personnel Search")
         sid = st.text_input("Enter Target ID")
-        if st.button("RUN QUERY") and sid:
-            conn = get_db_connection()
-            df = pd.read_sql_query("SELECT * FROM employees WHERE id = %s", conn, params=(int(sid),))
-            if not df.empty:
-                df['is_active'] = df['is_active'].apply(lambda x: "🟢 ACTIVE" if x == 1 else "🔴 TERMINATED")
-                st.dataframe(df, use_container_width=True)
-            else: st.error("Not Found")
+        if st.button("RUN QUERY"):
+            if sid:
+                conn = sqlite3.connect(SQL_DB)
+                df = pd.read_sql_query("SELECT * FROM employees WHERE CAST(id AS TEXT) = ?", conn, params=(sid,))
+                conn.close()
+                if not df.empty:
+                    st.dataframe(df, use_container_width=True)
+                else:
+                    st.error("ID Not Found")
+            else:
+                st.warning("Please enter an ID first.")
 
+    # --- MODULE: ENROLL USER ---
     elif menu == "➕ ENROLL USER":
-        st.header("👤 Biometric Enrollment")
-        st.subheader("Step 1 - Scanning Biometric")
-        webrtc_streamer(key="enroll_scan", video_transformer_factory=EnrollmentTransformer)
-        st.divider()
-        st.subheader("Step 2 - Complete Personnel Profile")
+        st.header("👤 Detailed Biometric Enrollment")
+        webrtc_streamer(
+            key="enroll_cam",
+            video_transformer_factory=EnrollmentTransformer,
+            async_processing=True,
+            rtc_configuration={
+                "iceServers": [
+                    {"urls": ["stun:stun.l.google.com:19302"]},
+                    {"urls": ["stun:stun1.l.google.com:19302"]},
+                    {"urls": ["stun:stun2.l.google.com:19302"]},
+                    {"urls": ["stun:stun3.l.google.com:19302"]},
+                    {"urls": ["stun:stun4.l.google.com:19302"]},
+                ]
+            },
+            media_stream_constraints={"video": True, "audio": False},
+        )
         with st.form("enroll_form"):
-            colA, colB = st.columns(2)
-            fn = colA.text_input("First Name *")
-            ln = colB.text_input("Last Name *")
-            dept = st.selectbox("Department", ["Technical", "Sales", "HR", "Admin", "Security"])
-            email = st.text_input("Email")
-            contact = st.text_input("Contact")
-            emergency = st.text_input("Emergency Contact")
-            address = st.text_area("Address")
-            comp = st.text_input("Compensation")
-            
-            # --- UPDATED: SELECTOR REPLACES TEXT INPUT ---
-            shift_obj = st.time_input("Shift Start Time", value=dt_time(9, 0))
-            grace = st.number_input("Grace Period (Mins)", value=15)
-            
-            st.divider()
-            st.subheader("Step 3 - Capture Biometric Sample Below")
-            captured_photo = st.camera_input("📸 CLICK TO CAPTURE")
-            if st.form_submit_button("✨ COMMIT TO CLOUD"):
-                if fn and captured_photo:
-                    # CONVERT TIME OBJECT TO STRICT DB STRING
-                    formatted_shift = shift_obj.strftime('%I:%M %p')
-                    folder = f"training_data/{fn.replace(' ', '_')}"
-                    os.makedirs(folder, exist_ok=True)
-                    with open(f"{folder}/profile.jpg", "wb") as f: f.write(captured_photo.getbuffer())
-                    conn = get_db_connection(); cur = conn.cursor()
-                    cur.execute("""INSERT INTO employees 
-                        (first_name, last_name, dept_name, email, contact, emergency_contact, address, compensation, shift_start, grace_period, folder_name, is_active) 
-                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,1) RETURNING id""", 
-                        (fn, ln, dept, email, contact, emergency, address, comp, formatted_shift, grace, folder))
-                    nid = cur.fetchone()[0]; conn.commit(); cur.close()
-                    st.success(f"ID {nid} SECURED.")
-                else: st.error("Missing First Name or Photo Capture.")
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                fn, ln = st.text_input("First Name *"), st.text_input("Last Name *")
+                dept = st.selectbox("Dept", ["Technical", "Sales", "HR", "Admin", "Security"])
+                email = st.text_input("Email")
+            with c2:
+                cont, econt = st.text_input("Contact"), st.text_input("Emergency Contact")
+                shift, grace = st.text_input("Shift (HH:MM)", "09:00"), st.number_input("Grace", 15)
+            with c3:
+                comp, perf = st.text_input("Salary/Comp"), st.selectbox("Performance", ["Excellent", "Good", "Average"])
+                status, addr = st.selectbox("Status", ["Office", "WFH", "Sick"]), st.text_area("Address")
 
+            photo = st.camera_input("Capture Biometric ID")
+
+            if st.form_submit_button("✨ COMMIT TO DATABASE"):
+                if fn and photo:
+                    conn = sqlite3.connect(SQL_DB)
+                    cur = conn.cursor()
+                    cur.execute(
+                        "INSERT INTO employees (first_name, last_name, dept_name, address, email, contact, emergency_contact, compensation, performance, shift_start, grace_period, current_status, is_active) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1)",
+                        (fn, ln, dept, addr, email, cont, econt, comp, perf, shift, grace, status))
+                    nid = cur.lastrowid
+                    folder = f"{nid}_{fn}"
+                    cur.execute("UPDATE employees SET folder_name=? WHERE id=?", (folder, nid))
+                    conn.commit()
+                    conn.close()
+
+                    os.makedirs(os.path.join(DB_PATH, folder), exist_ok=True)
+                    cv2.imwrite(os.path.join(DB_PATH, folder, f"{fn}.jpg"),
+                                cv2.imdecode(np.frombuffer(photo.read(), np.uint8), 1))
+
+                    st.success(f"✅ Enrollment Complete: {fn} assigned ID: {nid}")
+                    st.balloons()
+
+    # --- MODULE: MODIFY PERSONNEL ---
     elif menu == "📝 MODIFY PERSONNEL":
-        st.header("📝 Full Record Modification")
-        mid = st.number_input("Target ID to Fetch", min_value=1, step=1)
+        st.header("📝 Update Personnel Records")
+        mid = st.number_input("Target ID", min_value=1, step=1)
         if st.button("FETCH PROFILE"):
-            conn = get_db_connection(cursor_factory=RealDictCursor); cur = conn.cursor()
-            cur.execute("SELECT * FROM employees WHERE id=%s", (mid,))
-            res = cur.fetchone(); cur.close()
-            if res: st.session_state['mod_data'] = dict(res)
-            else: st.error("Record Not Found")
+            conn = sqlite3.connect(SQL_DB)
+            conn.row_factory = sqlite3.Row
+            res = conn.execute("SELECT * FROM employees WHERE id=?", (mid,)).fetchone()
+            conn.close()
+            if res:
+                st.session_state['mod_data'] = dict(res)
+            else:
+                st.error("Record Not Found")
+
         if 'mod_data' in st.session_state:
             d = st.session_state['mod_data']
             with st.form("mod_form"):
-                n_fn = st.text_input("First Name", value=d['first_name'])
-                n_ln = st.text_input("Last Name", value=d['last_name'] or "")
-                n_dept = st.selectbox("Department", ["Technical", "Sales", "HR", "Admin", "Security"], index=0)
-                n_email = st.text_input("Email", value=d['email'] or "")
-                n_contact = st.text_input("Contact", value=d['contact'] or "")
-                n_emergency = st.text_input("Emergency Contact", value=d['emergency_contact'] or "")
-                n_address = st.text_area("Address", value=d['address'] or "")
-                n_comp = st.text_input("Compensation", value=d['compensation'] or "")
-                
-                # --- UPDATED: SELECTOR LOADS PREVIOUS DB STRING ---
-                try:
-                    default_time = datetime.strptime(d['shift_start'], '%I:%M %p').time()
-                except:
-                    default_time = dt_time(9, 0)
-                n_shift_obj = st.time_input("Shift Start Time", value=default_time)
-                
-                n_grace = st.number_input("Grace Period", value=d['grace_period'])
-                if st.form_submit_button("💾 OVERWRITE"):
-                    # RE-FORMAT TO STRING BEFORE UPDATING DB
-                    n_formatted_shift = n_shift_obj.strftime('%I:%M %p')
-                    conn = get_db_connection(); cur = conn.cursor()
-                    cur.execute("""UPDATE employees SET 
-                        first_name=%s, last_name=%s, dept_name=%s, email=%s, contact=%s, 
-                        emergency_contact=%s, address=%s, compensation=%s, shift_start=%s, 
-                        grace_period=%s WHERE id=%s""", 
-                        (n_fn, n_ln, n_dept, n_email, n_contact, n_emergency, n_address, n_comp, n_formatted_shift, n_grace, d['id']))
-                    conn.commit(); cur.close(); st.success("Synced.")
+                mc1, mc2, mc3 = st.columns(3)
+                with mc1:
+                    n_fn = st.text_input("First Name", value=str(d.get('first_name', "")))
+                    n_ln = st.text_input("Last Name", value=str(d.get('last_name', "")))
+                    n_dept = st.selectbox("Dept", ["Technical", "Sales", "HR", "Admin", "Security"], index=0)
+                    n_email = st.text_input("Email", value=str(d.get('email', "")))
+                with mc2:
+                    n_cont = st.text_input("Contact", value=str(d.get('contact', "")))
+                    n_econt = st.text_input("Emergency", value=str(d.get('emergency_contact', "")))
+                    n_shift = st.text_input("Shift Start", value=str(d.get('shift_start', "09:00")))
+                    try:
+                        g_val = int(d.get('grace_period', 15))
+                    except:
+                        g_val = 15
+                    n_grace = st.number_input("Grace Period", value=g_val)
+                with mc3:
+                    n_comp = st.text_input("Compensation", value=str(d.get('compensation', "")))
+                    n_perf = st.selectbox("Performance", ["Excellent", "Good", "Average", "Needs Improvement"])
+                    n_status = st.selectbox("Current Status", ["Office", "WFH", "Sick", "Vacation"])
+                    n_addr = st.text_area("Address", value=str(d.get('address', "")))
+                if st.form_submit_button("💾 OVERWRITE RECORD"):
+                    conn = sqlite3.connect(SQL_DB)
+                    conn.execute("""UPDATE employees
+                                    SET first_name=?,
+                                        last_name=?,
+                                        dept_name=?,
+                                        address=?,
+                                        email=?,
+                                        contact=?,
+                                        emergency_contact=?,
+                                        compensation=?,
+                                        performance=?,
+                                        shift_start=?,
+                                        grace_period=?,
+                                        current_status=?
+                                    WHERE id = ?""",
+                                 (n_fn, n_ln, n_dept, n_addr, n_email, n_cont, n_econt, n_comp, n_perf, n_shift,
+                                  n_grace, n_status, mid))
+                    conn.commit()
+                    conn.close()
+                    st.success(f"💾 Record for ID {mid} synchronized successfully!")
+                    st.rerun()
 
+    # --- MODULE: TERMINATE ACCESS ---
     elif menu == "🗑️ TERMINATE ACCESS":
-        st.header("🚫 Revocation")
-        tid = st.number_input("Target ID", min_value=1)
-        if st.button("LOCATE"):
-            conn = get_db_connection(); cur = conn.cursor()
-            cur.execute("SELECT first_name, is_active FROM employees WHERE id=%s", (tid,))
-            res = cur.fetchone(); cur.close()
+        st.header("🚫 Security Access Revocation")
+        tid = st.number_input("Target Personnel ID", min_value=1)
+        if st.button("LOCATE PERSONNEL"):
+            conn = sqlite3.connect(SQL_DB)
+            res = conn.execute("SELECT first_name, is_active FROM employees WHERE id=?", (tid,)).fetchone()
+            conn.close()
             if res: st.session_state['term_target'] = {"id": tid, "name": res[0], "active": res[1]}
-            else: st.error("Record Not Found")
+
         if 'term_target' in st.session_state:
             target = st.session_state['term_target']
-            st.info(f"Target: {target['name']} | Status: {'🟢 ACTIVE' if target['active']==1 else '🔴 TERMINATED'}")
-            if st.button("TOGGLE ACCESS", type="primary"):
-                conn = get_db_connection(); cur = conn.cursor()
-                cur.execute("UPDATE employees SET is_active=%s WHERE id=%s", (0 if target['active'] == 1 else 1, target['id']))
-                conn.commit(); cur.close(); del st.session_state['term_target']; st.rerun()
+            btn = "🔄 REINSTATE ACCESS" if target['active'] == 0 else "❗ TERMINATE ACCESS"
+            if st.button(btn, use_container_width=True, type="primary"):
+                new_s = 1 if target['active'] == 0 else 0
+                conn = sqlite3.connect(SQL_DB)
+                conn.execute("UPDATE employees SET is_active=? WHERE id=?", (new_s, target['id']))
+                conn.commit()
+                conn.close()
+                st.warning(f"⚠️ ACCESS UPDATED: {target['name']} is now {'ACTIVE' if new_s == 1 else 'BANNED'}")
+                del st.session_state['term_target']
+                time.sleep(1)
+                st.rerun()
 
+    # --- MODULE: DIRECTORY ---
     elif menu == "📂 STAFF DIRECTORY":
-        st.header("Staff Records")
-        conn = get_db_connection()
-        df = pd.read_sql_query("SELECT * FROM employees ORDER BY id ASC", conn)
-        df['is_active'] = df['is_active'].apply(lambda x: "🟢" if x == 1 else "🔴")
-        st.dataframe(df, use_container_width=True)
+        st.header("Staff Records Overview")
+        conn = sqlite3.connect(SQL_DB)
+        st.dataframe(pd.read_sql_query("SELECT * FROM employees", conn), use_container_width=True)
+        conn.close()
 
+    # --- MODULE: REPORTS ---
     elif menu == "📊 DAILY REPORTS":
-        show_daily_intelligence_fragment()
+        st.header("Daily Attendance Intelligence")
+        today = datetime.now().strftime('%Y-%m-%d')
+        conn = sqlite3.connect(SQL_DB)
+        q = f"SELECT a.emp_id, e.first_name, e.dept_name, a.clock_in, a.late_minutes FROM attendance a JOIN employees e ON a.emp_id = e.id WHERE a.date = '{today}' AND e.is_active = 1"
+        df = pd.read_sql_query(q, conn)
+        conn.close()
+        if not df.empty:
+            st.dataframe(df, use_container_width=True)
+        else:
+            st.info("No active logs for today.")
