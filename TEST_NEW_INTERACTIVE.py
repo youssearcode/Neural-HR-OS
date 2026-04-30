@@ -106,14 +106,14 @@ def send_security_notification(subject, body):
 class EnrollmentTransformer(VideoTransformerBase):
     def __init__(self):
         self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-    def transform(self, frame):
+    def recv(self, frame):
         img = frame.to_ndarray(format="bgr24")
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         faces = self.face_cascade.detectMultiScale(gray, 1.3, 5)
         for (x, y, w, h) in faces:
             cv2.rectangle(img, (x, y), (x + w, y + h), (255, 0, 0), 2)
             cv2.putText(img, "SCANNING BIOMETRICS...", (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
-        return img
+        return av.VideoFrame.from_ndarray(img, format="bgr24")
 
 # --- FIX: Only ONE definition of FaceRecognitionTransformer ---
 # --- 5. CORRECTED TRANSFORMERS ---
@@ -143,7 +143,7 @@ class FaceRecognitionTransformer(VideoTransformerBase):
             conn.commit()
         conn.close()
 
-    def transform(self, frame):
+    def recv(self, frame):
         img = frame.to_ndarray(format="bgr24")
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         faces = self.face_cascade.detectMultiScale(gray, 1.3, 5)
@@ -172,7 +172,7 @@ class FaceRecognitionTransformer(VideoTransformerBase):
             cv2.rectangle(img, (x, y), (x + w, y + h), color, 2)
             cv2.putText(img, label, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
 
-        return img
+        return av.VideoFrame.from_ndarray(img, format="bgr24")
 
 # --- 6. MAIN APP LOGIC ---
 # (Rest of your code remains identical, ensure your apply_custom_styles() is defined before calling it)
@@ -235,7 +235,7 @@ else:
         st.header("Gateway Security Feed")
         webrtc_streamer(
             key="vision",
-            video_transformer_factory=FaceRecognitionTransformer,
+            video_processor_factory=FaceRecognitionTransformer,  # <-- NEW (Correct)
             async_processing=True,
             rtc_configuration={
                 "iceServers": [
@@ -269,8 +269,8 @@ else:
     elif menu == "➕ ENROLL USER":
         st.header("👤 Detailed Biometric Enrollment")
         webrtc_streamer(
-            key="enroll_cam",
-            video_transformer_factory=EnrollmentTransformer,
+            key="vision",
+            video_processor_factory=FaceRecognitionTransformer,  # <-- NEW (Correct)
             async_processing=True,
             rtc_configuration={
                 "iceServers": [
