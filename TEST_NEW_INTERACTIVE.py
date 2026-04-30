@@ -193,7 +193,7 @@ class EnrollmentTransformer(VideoTransformerBase):
 class FaceRecognitionTransformer(VideoTransformerBase):
     def __init__(self):
         self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-        self.last_alert = {}
+        self.last_alert = {}  # Stores timestamps for rate-limiting emails
 
     def mark_attendance(self, emp_id, name, shift_start, grace):
         now = datetime.now()
@@ -215,6 +215,49 @@ class FaceRecognitionTransformer(VideoTransformerBase):
             conn.execute("UPDATE attendance SET clock_out=? WHERE emp_id=? AND date=?", (current_time, emp_id, today))
             conn.commit()
         conn.close()
+
+    def transform(self, frame):
+        img = frame.to_ndarray(format="bgr24")
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        faces = self.face_cascade.detectMultiScale(gray, 1.3, 5)
+
+        conn = sqlite3.connect(SQL_DB)
+        users = conn.execute("SELECT id, first_name, is_active, shift_start, grace_period FROM employees").fetchall()
+        conn.close()
+
+        for (x, y, w, h) in faces:
+            color, label = (0, 255, 255), "IDENTIFYING..."
+
+            for eid, fname, active, shift, grace in users:
+                # 1. Check for Terminated Status
+                if active == 0:
+                    color, label = (0, 0, 255), f"⚠️ ACCESS DENIED: {fname}"
+
+                    # 2. Rate-limited Security Notification (1-hour window)
+                    if eid not in self.last_alert or (time.time() - self.last_alert[eid]) > 3600:
+                        body = f"""
+                        SECURITY BREACH DETECTED
+                        -----------------------
+                        Personnel Name: {fname}
+                        Personnel ID: {eid}
+                        Detection Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+                        Status: TERMINATED
+
+                        This is an automated security alert from NEURAL HR OS 2026.
+                        """
+                        send_alert_email("🚨 GATEWAY VIOLATION: TERMINATED ACCESS ATTEMPT", body)
+                        self.last_alert[eid] = time.time()
+
+                # 3. Active User Logic
+                else:
+                    color, label = (0, 255, 0), f"VERIFIED: {fname}"
+                    self.mark_attendance(eid, fname, shift, grace)
+
+            # Apply visual feedback to the frame
+            cv2.rectangle(img, (x, y), (x + w, y + h), color, 2)
+            cv2.putText(img, label, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+
+        return img
 
     def transform(self, frame):
         img = frame.to_ndarray(format="bgr24")
@@ -269,6 +312,12 @@ if not st.session_state.authenticated:
                 elif mk == MASTER_KEY:
                     with open(PASS_FILE, "w") as f:
                         f.write(new_p)
+                    # --- SEND EMAIL ON RESET ---
+                    send_alert_email(
+                            "⚠️ SYSTEM SECURITY ALERT: PASSWORD RESET",
+                            f"A system password reset was authorized at {datetime.now().strftime('%H:%M:%S')}.\n\nEnsure this was an intentional action by the HR Admin."
+                    )
+
                     st.success("System Reset Successful. Redirecting to Login...")
                     time.sleep(2)
                     st.rerun()
@@ -468,6 +517,22 @@ else:
     # --- MODULE: REPORTS ---
     elif menu == "📊 DAILY REPORTS":
         st.header("Daily Attendance Intelligence")
+
+    elif menu == "📊 DAILY REPORTS":
+        st.header("📊 Daily Attendance Intelligence")
+        # --- ADD THIS PURGE BUTTON ---
+        with st.expander("⚠️ DANGER ZONE: SYSTEM PURGE"):
+            if st.button("🚨 DELETE ALL DATA & RESET DATABASE"):
+                conn = sqlite3.connect(SQL_DB)
+                conn.execute("DELETE FROM employees")
+                conn.execute("DELETE FROM attendance")
+                conn.commit()
+                conn.close()
+                st.warning("All records purged. System reset to factory state.")
+                time.sleep(2)
+                st.rerun()
+
+        # ... existing report logic ...
         today = datetime.now().strftime('%Y-%m-%d')
         conn = sqlite3.connect(SQL_DB)
         q = f"SELECT a.emp_id, e.first_name, e.dept_name, a.clock_in, a.late_minutes FROM attendance a JOIN employees e ON a.emp_id = e.id WHERE a.date = '{today}' AND e.is_active = 1"
