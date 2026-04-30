@@ -18,91 +18,18 @@ st.set_page_config(page_title="NEURAL HR OS 2026", layout="wide", page_icon="�
 # --- 2. DATABASE & MIGRATION ---
 SQL_DB = "HR_Database.db"
 
-
 def init_sql():
     conn = sqlite3.connect(SQL_DB)
-    conn.execute('''CREATE TABLE IF NOT EXISTS employees
-                    (
-                        id
-                        INTEGER
-                        PRIMARY
-                        KEY
-                        AUTOINCREMENT,
-                        first_name
-                        TEXT,
-                        last_name
-                        TEXT,
-                        dept_name
-                        TEXT,
-                        address
-                        TEXT,
-                        email
-                        TEXT,
-                        contact
-                        TEXT,
-                        emergency_contact
-                        TEXT,
-                        compensation
-                        TEXT,
-                        performance
-                        TEXT,
-                        folder_name
-                        TEXT,
-                        shift_start
-                        TEXT
-                        DEFAULT
-                        "09:00",
-                        grace_period
-                        INTEGER
-                        DEFAULT
-                        15,
-                        current_status
-                        TEXT
-                        DEFAULT
-                        "Office",
-                        is_active
-                        INTEGER
-                        DEFAULT
-                        1
-                    )''')
-
-    conn.execute('''CREATE TABLE IF NOT EXISTS attendance
-                    (
-                        id
-                        INTEGER
-                        PRIMARY
-                        KEY
-                        AUTOINCREMENT,
-                        emp_id
-                        INTEGER,
-                        name
-                        TEXT,
-                        date
-                        TEXT,
-                        clock_in
-                        TEXT,
-                        clock_out
-                        TEXT,
-                        late_minutes
-                        INTEGER,
-                        penalty
-                        TEXT,
-                        status
-                        TEXT
-                    )''')
-
+    conn.execute('''CREATE TABLE IF NOT EXISTS employees (id INTEGER PRIMARY KEY AUTOINCREMENT, first_name TEXT, last_name TEXT, dept_name TEXT, address TEXT, email TEXT, contact TEXT, emergency_contact TEXT, compensation TEXT, performance TEXT, folder_name TEXT, shift_start TEXT DEFAULT "09:00", grace_period INTEGER DEFAULT 15, current_status TEXT DEFAULT "Office", is_active INTEGER DEFAULT 1)''')
+    conn.execute('''CREATE TABLE IF NOT EXISTS attendance (id INTEGER PRIMARY KEY AUTOINCREMENT, emp_id INTEGER, name TEXT, date TEXT, clock_in TEXT, clock_out TEXT, late_minutes INTEGER, penalty TEXT, status TEXT)''')
     cursor = conn.execute("PRAGMA table_info(employees)")
     columns = [column[1] for column in cursor.fetchall()]
     if "is_active" not in columns:
         try:
             conn.execute("ALTER TABLE employees ADD COLUMN is_active INTEGER DEFAULT 1")
-            st.toast("Database Migrated: Added 'is_active' column.")
-        except:
-            pass
-
+        except: pass
     conn.commit()
     conn.close()
-
 
 init_sql()
 
@@ -112,7 +39,6 @@ EMAIL_PASS = "xjpwurhrozvybini"
 HR_RECIPIENT = "mohamedauoup@gmail.com"
 PASS_FILE = "hr_password.txt"
 MASTER_KEY = "1234567"
-#DB_PATH = r"G:\Training Data"
 DB_PATH = "attendance_data"
 
 if not os.path.exists(PASS_FILE):
@@ -124,10 +50,10 @@ if not os.path.exists(PASS_FILE):
 def get_video_base64(file_path):
     try:
         if os.path.exists(file_path):
-            with open(file_path, "rb") as f: return base64.b64encode(f.read()).decode()
+            with open(file_path, "rb") as f:
+                return base64.b64encode(f.read()).decode()
     except:
         return None
-
 
 def apply_custom_styles():
     video_path = "1.mp4"
@@ -162,11 +88,13 @@ def apply_custom_styles():
     )
 
 
-def send_alert_email(name):
+
+
+# --- FIX: Ensure this function accepts exactly two arguments ---
+def send_security_notification(subject, body):
     try:
-        msg = MIMEText(
-            f"SECURITY ALERT: Terminated employee {name} detected at gateway: {datetime.now().strftime('%H:%M:%S')}")
-        msg['Subject'] = "GATEWAY VIOLATION: TERMINATED ACCESS ATTEMPT"
+        msg = MIMEText(body)
+        msg['Subject'] = subject
         msg['From'], msg['To'] = EMAIL_USER, HR_RECIPIENT
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
             server.login(EMAIL_USER, EMAIL_PASS)
@@ -174,12 +102,10 @@ def send_alert_email(name):
     except Exception as e:
         print(f"Email Failed: {e}")
 
-
 # --- 5. TRANSFORMERS ---
 class EnrollmentTransformer(VideoTransformerBase):
     def __init__(self):
         self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-
     def transform(self, frame):
         img = frame.to_ndarray(format="bgr24")
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
@@ -189,7 +115,8 @@ class EnrollmentTransformer(VideoTransformerBase):
             cv2.putText(img, "SCANNING BIOMETRICS...", (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
         return img
 
-
+# --- FIX: Only ONE definition of FaceRecognitionTransformer ---
+# --- 5. CORRECTED TRANSFORMERS ---
 class FaceRecognitionTransformer(VideoTransformerBase):
     def __init__(self):
         self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
@@ -232,22 +159,10 @@ class FaceRecognitionTransformer(VideoTransformerBase):
                 # 1. Check for Terminated Status
                 if active == 0:
                     color, label = (0, 0, 255), f"⚠️ ACCESS DENIED: {fname}"
-
                     # 2. Rate-limited Security Notification (1-hour window)
                     if eid not in self.last_alert or (time.time() - self.last_alert[eid]) > 3600:
-                        body = f"""
-                        SECURITY BREACH DETECTED
-                        -----------------------
-                        Personnel Name: {fname}
-                        Personnel ID: {eid}
-                        Detection Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-                        Status: TERMINATED
-
-                        This is an automated security alert from NEURAL HR OS 2026.
-                        """
-                        send_alert_email("🚨 GATEWAY VIOLATION: TERMINATED ACCESS ATTEMPT", body)
+                        send_security_notification(fname)
                         self.last_alert[eid] = time.time()
-
                 # 3. Active User Logic
                 else:
                     color, label = (0, 255, 0), f"VERIFIED: {fname}"
@@ -259,29 +174,8 @@ class FaceRecognitionTransformer(VideoTransformerBase):
 
         return img
 
-    def transform(self, frame):
-        img = frame.to_ndarray(format="bgr24")
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        faces = self.face_cascade.detectMultiScale(gray, 1.3, 5)
-
-        conn = sqlite3.connect(SQL_DB)
-        users = conn.execute("SELECT id, first_name, is_active, shift_start, grace_period FROM employees").fetchall()
-        conn.close()
-
-        for (x, y, w, h) in faces:
-            color, label = (0, 255, 255), "IDENTIFYING..."
-            for eid, fname, active, shift, grace in users:
-                if active == 0:
-                    color, label = (0, 0, 255), f"⚠️ ACCESS DENIED: {fname}"
-                    if eid not in self.last_alert or (time.time() - self.last_alert[eid]) > 3600:
-                        send_alert_email(fname)
-                        self.last_alert[eid] = time.time()
-                else:
-                    color, label = (0, 255, 0), f"VERIFIED: {fname}"
-                    self.mark_attendance(eid, fname, shift, grace)
-            cv2.rectangle(img, (x, y), (x + w, y + h), color, 2)
-            cv2.putText(img, label, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
-        return img
+# --- 6. MAIN APP LOGIC ---
+# (Rest of your code remains identical, ensure your apply_custom_styles() is defined before calling it)
 
 
 # --- 6. MAIN APP LOGIC ---
@@ -313,9 +207,10 @@ if not st.session_state.authenticated:
                     with open(PASS_FILE, "w") as f:
                         f.write(new_p)
                     # --- SEND EMAIL ON RESET ---
-                    send_alert_email(
-                            "⚠️ SYSTEM SECURITY ALERT: PASSWORD RESET",
-                            f"A system password reset was authorized at {datetime.now().strftime('%H:%M:%S')}.\n\nEnsure this was an intentional action by the HR Admin."
+                    # Update this line
+                    send_security_notification(
+                        "⚠️ SYSTEM SECURITY ALERT: PASSWORD RESET",
+                        f"A system password reset was authorized at {datetime.now().strftime('%H:%M:%S')}."
                     )
 
                     st.success("System Reset Successful. Redirecting to Login...")
@@ -516,11 +411,9 @@ else:
 
     # --- MODULE: REPORTS ---
     elif menu == "📊 DAILY REPORTS":
-        st.header("Daily Attendance Intelligence")
-
-    elif menu == "📊 DAILY REPORTS":
         st.header("📊 Daily Attendance Intelligence")
-        # --- ADD THIS PURGE BUTTON ---
+
+        # DANGER ZONE
         with st.expander("⚠️ DANGER ZONE: SYSTEM PURGE"):
             if st.button("🚨 DELETE ALL DATA & RESET DATABASE"):
                 conn = sqlite3.connect(SQL_DB)
