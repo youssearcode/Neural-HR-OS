@@ -1,11 +1,7 @@
 streamlit
-streamlit-webrtc
+streamlit-webrtc==0.47.6
 opencv-python-headless
-psycopg2-binary
+av
 pandas
 numpy
-av
-xlsxwriter
-
-
-
+tornado==6.4.1
