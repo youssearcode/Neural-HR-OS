@@ -12,6 +12,17 @@ import smtplib
 from email.mime.text import MIMEText
 import time
 
+import asyncio
+import sys
+
+# Patch for the Event Loop issue in Streamlit/WebRTC
+if sys.version_info >= (3, 14):
+    try:
+        asyncio.get_event_loop_policy().get_event_loop()
+    except RuntimeError:
+        asyncio.get_event_loop_policy().set_event_loop(asyncio.new_event_loop())
+
+
 # --- 1. CONFIG & AUTH SETTINGS ---
 st.set_page_config(page_title="NEURAL HR OS 2026", layout="wide", page_icon="🛡️")
 
