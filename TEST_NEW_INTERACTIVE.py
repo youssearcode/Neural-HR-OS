@@ -18,6 +18,11 @@ from supabase import create_client
 st.set_page_config(page_title="NEURAL HR OS 2026", layout="wide", page_icon="🛡️")
 supabase = create_client(st.secrets["supabase"]["url"], st.secrets["supabase"]["key"])
 
+# CLOUD FIX: Required for Streamlit Cloud to connect to your local webcam
+RTC_CONFIGURATION = {
+    "iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]
+}
+
 def get_db_connection():
     return psycopg2.connect(st.secrets["postgres"]["url"])
 
@@ -64,7 +69,7 @@ MASTER_KEY = "1234567"
 if not os.path.exists(PASS_FILE):
     with open(PASS_FILE, "w") as f: f.write("123")
 
-# --- 2. VIDEO BACKGROUND (Make sure 1.mp4 is in your folder!) ---
+# --- 2. VIDEO BACKGROUND ---
 @st.cache_data
 def get_video_base64(file_path):
     if os.path.exists(file_path):
@@ -106,7 +111,6 @@ class FaceRecognitionTransformer(VideoProcessorBase):
         conn = get_db_connection(); cur = conn.cursor()
         
         for (x, y, w, h) in faces:
-            # Fetch user details for recognition logic
             cur.execute("SELECT id, first_name, last_name, is_active FROM employees ORDER BY id DESC LIMIT 1")
             res = cur.fetchone()
             if res:
@@ -115,7 +119,6 @@ class FaceRecognitionTransformer(VideoProcessorBase):
                 color = (0, 255, 0) if active == 1 else (0, 0, 255)
                 status = "ACTIVE" if active == 1 else "TERMINATED"
                 
-                # TERMINATED ALERT LOGIC
                 if active == 0 and (time.time() - self.last_email_time > 60):
                     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     alert_msg = f"ALERT: Terminated Person Detected!\n\nName: {full_name}\nID: {uid}\nTime: {now}"
@@ -138,7 +141,6 @@ if not st.session_state.authenticated:
         st.title("🛡️ HR ACCESS PANEL")
         pwd = st.text_input("Console Password", type="password")
         
-        # FORGET PASSWORD LOGIC
         with st.expander("🔑 Reset System Access"):
             f_mk = st.text_input("Master Security Key", type="password")
             f_np = st.text_input("New Access Password", type="password")
@@ -166,11 +168,13 @@ else:
         menu = st.radio("Management", ["📺 LIVE VISION", "🔍 SEARCH BY ID", "➕ ENROLL USER", "📝 MODIFY PERSONNEL", "🗑️ TERMINATE ACCESS", "📂 STAFF DIRECTORY", "📊 DAILY REPORTS"])
 
     if menu == "📺 LIVE VISION":
-        webrtc_streamer(key="vision", video_processor_factory=FaceRecognitionTransformer)
+        # CLOUD FIX: Applied rtc_configuration
+        webrtc_streamer(key="vision", video_processor_factory=FaceRecognitionTransformer, rtc_configuration=RTC_CONFIGURATION)
 
     elif menu == "➕ ENROLL USER":
         st.subheader("Facial Bio-Scanning")
-        webrtc_streamer(key="enroll_cam", video_processor_factory=EnrollmentTransformer)
+        # CLOUD FIX: Applied rtc_configuration
+        webrtc_streamer(key="enroll_cam", video_processor_factory=EnrollmentTransformer, rtc_configuration=RTC_CONFIGURATION)
         with st.form("enroll_form"):
             col1, col2 = st.columns(2)
             with col1:
