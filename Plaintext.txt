@@ -1,5 +1,1 @@
-.streamlit/secrets.toml
-hr_password.txt
-__pycache__/
-.env
-.DS_Store
+
