@@ -24,12 +24,12 @@ except RuntimeError:
 # --- 1. CONFIG & AUTH SETTINGS ---
 st.set_page_config(page_title="NEURAL HR OS 2026", layout="wide", page_icon="🛡️")
 
+# Initialize Supabase Client
+supabase = create_client(st.secrets["supabase"]["url"], st.secrets["supabase"]["key"])
+
 # --- 2. DATABASE & MIGRATION ---
 def get_db_connection():
     return psycopg2.connect(st.secrets["postgres"]["url"])
-
-# Initialize Supabase Client
-supabase = create_client(st.secrets["supabase"]["url"], st.secrets["supabase"]["key"])
 
 def upload_to_supabase(image_bytes, file_name):
     """Uploads image to Supabase bucket and returns the public URL."""
@@ -68,7 +68,6 @@ EMAIL_PASS = "xjpwurhrozvybini"
 HR_RECIPIENT = "mohamedauoup@gmail.com"
 PASS_FILE = "hr_password.txt"
 MASTER_KEY = "1234567"
-DB_PATH = "attendance_data"
 
 if not os.path.exists(PASS_FILE):
     with open(PASS_FILE, "w") as f: f.write("123")
@@ -98,10 +97,36 @@ def apply_custom_styles():
         .stButton>button {{ background-color: rgba(0, 210, 255, 0.3) !important; border: 1px solid #00d2ff !important; color: white !important; }}
         </style>""", unsafe_allow_html=True)
 
-# --- 5. TRANSFORMERS & LOGIC ---
+def send_security_notification(subject, body):
+    try:
+        msg = MIMEText(body)
+        msg['Subject'] = subject
+        msg['From'], msg['To'] = EMAIL_USER, HR_RECIPIENT
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(EMAIL_USER, EMAIL_PASS)
+            server.send_message(msg)
+    except Exception as e: print(f"Email Failed: {e}")
+
+# --- 5. TRANSFORMERS ---
 class FaceRecognitionTransformer(VideoProcessorBase):
     def __init__(self):
         self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+        self.last_db_fetch = 0
+        self.users = []
+
+    def mark_attendance(self, emp_id, name):
+        now = datetime.now()
+        today, current_time = now.strftime('%Y-%m-%d'), now.strftime('%H:%M')
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM attendance WHERE emp_id=%s AND date=%s", (emp_id, today))
+        exists = cur.fetchone()
+        if not exists:
+            cur.execute("INSERT INTO attendance (emp_id, name, date, clock_in, status) VALUES (%s,%s,%s,%s,%s)", (emp_id, name, today, current_time, "Office"))
+        else:
+            cur.execute("UPDATE attendance SET clock_out=%s WHERE emp_id=%s AND date=%s", (current_time, emp_id, today))
+        conn.commit(); cur.close(); conn.close()
+
     def recv(self, frame: av.VideoFrame) -> av.VideoFrame:
         img = frame.to_ndarray(format="bgr24")
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
