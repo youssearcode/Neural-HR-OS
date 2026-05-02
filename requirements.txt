@@ -5,3 +5,14 @@ av
 pandas
 numpy
 tornado==6.4.1
+psycopg2-binary
+supabase
+av
+pandas
+numpy
+
+
+
+
+
+
