@@ -1,5 +1,6 @@
+import asyncio
 import streamlit as st
-from streamlit_webrtc import webrtc_streamer, VideoTransformerBase
+from streamlit_webrtc import webrtc_streamer, VideoProcessorBase # Updated from VideoTransformerBase
 import av
 import cv2
 import os
@@ -11,17 +12,6 @@ from datetime import datetime
 import smtplib
 from email.mime.text import MIMEText
 import time
-
-import asyncio
-import sys
-
-# Patch for the Event Loop issue in Streamlit/WebRTC
-if sys.version_info >= (3, 14):
-    try:
-        asyncio.get_event_loop_policy().get_event_loop()
-    except RuntimeError:
-        asyncio.get_event_loop_policy().set_event_loop(asyncio.new_event_loop())
-
 
 # --- 1. CONFIG & AUTH SETTINGS ---
 st.set_page_config(page_title="NEURAL HR OS 2026", layout="wide", page_icon="🛡️")
@@ -114,21 +104,22 @@ def send_security_notification(subject, body):
         print(f"Email Failed: {e}")
 
 # --- 5. TRANSFORMERS ---
-class EnrollmentTransformer(VideoTransformerBase):
+class EnrollmentTransformer(VideoProcessorBase):
     def __init__(self):
         self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-    def recv(self, frame):
+
+    def recv(self, frame: av.VideoFrame) -> av.VideoFrame:
         img = frame.to_ndarray(format="bgr24")
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        faces = self.face_cascade.detectMultiScale(gray, 1.3, 5)
+        faces = self.face_cascade.detectMultiScale(gray, 1.1, 4)
         for (x, y, w, h) in faces:
             cv2.rectangle(img, (x, y), (x + w, y + h), (255, 0, 0), 2)
-            cv2.putText(img, "SCANNING BIOMETRICS...", (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
+            cv2.putText(img, "SCANNING...", (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
         return av.VideoFrame.from_ndarray(img, format="bgr24")
 
 # --- FIX: Only ONE definition of FaceRecognitionTransformer ---
 # --- 5. CORRECTED TRANSFORMERS ---
-class FaceRecognitionTransformer(VideoTransformerBase):
+class FaceRecognitionTransformer(VideoProcessorBase):
     def __init__(self):
         self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
         self.last_alert = {}  # Stores timestamps for rate-limiting emails
@@ -154,7 +145,7 @@ class FaceRecognitionTransformer(VideoTransformerBase):
             conn.commit()
         conn.close()
 
-    def recv(self, frame):
+    def recv(self, frame: av.VideoFrame) -> av.VideoFrame:
         img = frame.to_ndarray(format="bgr24")
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         faces = self.face_cascade.detectMultiScale(gray, 1.3, 5)
