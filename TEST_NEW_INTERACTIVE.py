@@ -32,12 +32,9 @@ def get_db_connection():
     return psycopg2.connect(st.secrets["postgres"]["url"])
 
 def upload_to_supabase(image_bytes, file_name):
-    """Uploads image to Supabase bucket and returns the public URL."""
     try:
         supabase.storage.from_("employee-photos").upload(
-            path=file_name,
-            file=image_bytes,
-            file_options={"content-type": "image/jpeg"}
+            path=file_name, file=image_bytes, file_options={"content-type": "image/jpeg"}
         )
         return supabase.storage.from_("employee-photos").get_public_url(file_name)
     except Exception as e:
@@ -56,9 +53,7 @@ def init_db():
     cur.execute('''CREATE TABLE IF NOT EXISTS attendance (
         id SERIAL PRIMARY KEY, emp_id INTEGER, name TEXT, date TEXT, 
         clock_in TEXT, clock_out TEXT, late_minutes INTEGER, penalty TEXT, status TEXT)''')
-    conn.commit()
-    cur.close()
-    conn.close()
+    conn.commit(); cur.close(); conn.close()
 
 init_db()
 
@@ -67,7 +62,6 @@ EMAIL_USER = "mohamedauoup@gmail.com"
 EMAIL_PASS = "xjpwurhrozvybini"
 HR_RECIPIENT = "mohamedauoup@gmail.com"
 PASS_FILE = "hr_password.txt"
-MASTER_KEY = "1234567"
 
 if not os.path.exists(PASS_FILE):
     with open(PASS_FILE, "w") as f: f.write("123")
@@ -77,16 +71,13 @@ if not os.path.exists(PASS_FILE):
 def get_video_base64(file_path):
     try:
         if os.path.exists(file_path):
-            with open(file_path, "rb") as f:
-                return base64.b64encode(f.read()).decode()
-    except:
-        return None
+            with open(file_path, "rb") as f: return base64.b64encode(f.read()).decode()
+    except: return None
 
 def apply_custom_styles():
     video_path = "1.mp4"
     video_base64 = get_video_base64(video_path)
     video_html = f'<video autoplay loop muted playsinline id="bg-video"><source src="data:video/mp4;base64,{video_base64}" type="video/mp4"></video>' if video_base64 else ""
-
     st.markdown(f"""{video_html}
         <style>
         #bg-video {{ position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; object-fit: cover; z-index: -1; }}
@@ -99,40 +90,21 @@ def apply_custom_styles():
 
 def send_security_notification(subject, body):
     try:
-        msg = MIMEText(body)
-        msg['Subject'] = subject
+        msg = MIMEText(body); msg['Subject'] = subject
         msg['From'], msg['To'] = EMAIL_USER, HR_RECIPIENT
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-            server.login(EMAIL_USER, EMAIL_PASS)
-            server.send_message(msg)
+            server.login(EMAIL_USER, EMAIL_PASS); server.send_message(msg)
     except Exception as e: print(f"Email Failed: {e}")
 
 # --- 5. TRANSFORMERS ---
 class FaceRecognitionTransformer(VideoProcessorBase):
     def __init__(self):
         self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-        self.last_db_fetch = 0
-        self.users = []
-
-    def mark_attendance(self, emp_id, name):
-        now = datetime.now()
-        today, current_time = now.strftime('%Y-%m-%d'), now.strftime('%H:%M')
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute("SELECT id FROM attendance WHERE emp_id=%s AND date=%s", (emp_id, today))
-        exists = cur.fetchone()
-        if not exists:
-            cur.execute("INSERT INTO attendance (emp_id, name, date, clock_in, status) VALUES (%s,%s,%s,%s,%s)", (emp_id, name, today, current_time, "Office"))
-        else:
-            cur.execute("UPDATE attendance SET clock_out=%s WHERE emp_id=%s AND date=%s", (current_time, emp_id, today))
-        conn.commit(); cur.close(); conn.close()
-
     def recv(self, frame: av.VideoFrame) -> av.VideoFrame:
         img = frame.to_ndarray(format="bgr24")
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         faces = self.face_cascade.detectMultiScale(gray, 1.3, 5)
-        for (x, y, w, h) in faces:
-            cv2.rectangle(img, (x, y), (x + w, y + h), (0, 255, 0), 2)
+        for (x, y, w, h) in faces: cv2.rectangle(img, (x, y), (x + w, y + h), (0, 255, 0), 2)
         return av.VideoFrame.from_ndarray(img, format="bgr24")
 
 # --- 6. MAIN APP LOGIC ---
@@ -143,6 +115,11 @@ if not st.session_state.authenticated:
     col = st.columns([1, 1.5, 1])[1]
     with col:
         pwd = st.text_input("HR Security Password", type="password")
+        # Added Forgot Password Logic
+        if st.button("Forgot Password?"):
+            with open(PASS_FILE, "r") as f:
+                send_security_notification("HR OS Password Recovery", f"Current Password: {f.read().strip()}")
+                st.info("Check your email!")
         if st.button("AUTHORIZE ACCESS"):
             with open(PASS_FILE, "r") as f:
                 if pwd == f.read().strip(): st.session_state.authenticated = True; st.rerun()
@@ -160,24 +137,17 @@ else:
         if st.button("RUN QUERY"):
             conn = get_db_connection()
             df = pd.read_sql_query("SELECT * FROM employees WHERE id=%s", conn, params=(sid,))
-            st.dataframe(df)
-            conn.close()
+            st.dataframe(df); conn.close()
 
     elif menu == "➕ ENROLL USER":
         with st.form("enroll_form"):
             fn = st.text_input("First Name")
             photo = st.camera_input("Capture Biometric ID")
             if st.form_submit_button("✨ COMMIT TO DATABASE"):
-                cloud_url = None
-                if photo:
-                    image_bytes = photo.getvalue()
-                    file_name = f"{fn}_{datetime.now().strftime('%Y%m%d%H%M%S')}.jpg"
-                    cloud_url = upload_to_supabase(image_bytes, file_name)
-                conn = get_db_connection()
-                cur = conn.cursor()
+                cloud_url = upload_to_supabase(photo.getvalue(), f"{fn}_{int(time.time())}.jpg") if photo else None
+                conn = get_db_connection(); cur = conn.cursor()
                 cur.execute("INSERT INTO employees (first_name, photo_url, is_active) VALUES (%s, %s, 1)", (fn, cloud_url))
-                conn.commit(); cur.close(); conn.close()
-                st.success("✅ Enrollment Complete"); st.balloons()
+                conn.commit(); cur.close(); conn.close(); st.success("✅ Enrollment Complete"); st.balloons()
 
     elif menu == "📝 MODIFY PERSONNEL":
         mid = st.number_input("Target ID", min_value=1)
