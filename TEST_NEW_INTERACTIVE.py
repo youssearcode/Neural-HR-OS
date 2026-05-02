@@ -13,6 +13,15 @@ import smtplib
 from email.mime.text import MIMEText
 import time
 
+import asyncio
+
+# --- FIX: Asyncio Loop Initialization ---
+try:
+    loop = asyncio.get_event_loop()
+except RuntimeError:
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
 # --- 1. CONFIG & AUTH SETTINGS ---
 st.set_page_config(page_title="NEURAL HR OS 2026", layout="wide", page_icon="🛡️")
 
