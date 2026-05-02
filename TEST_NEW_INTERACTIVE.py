@@ -12,7 +12,6 @@ from datetime import datetime
 import smtplib
 from email.mime.text import MIMEText
 import time
-
 import asyncio
 
 # --- FIX: Asyncio Loop Initialization ---
@@ -21,6 +20,7 @@ try:
 except RuntimeError:
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
+
 
 # --- 1. CONFIG & AUTH SETTINGS ---
 st.set_page_config(page_title="NEURAL HR OS 2026", layout="wide", page_icon="🛡️")
@@ -131,7 +131,7 @@ class EnrollmentTransformer(VideoProcessorBase):
 class FaceRecognitionTransformer(VideoProcessorBase):
     def __init__(self):
         self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-        self.last_alert = {}  # Stores timestamps for rate-limiting emails
+        self.last_alert = {}
 
     def mark_attendance(self, emp_id, name, shift_start, grace):
         now = datetime.now()
@@ -249,12 +249,7 @@ else:
             video_processor_factory=FaceRecognitionTransformer,  # <-- NEW (Correct)
             async_processing=True,
             rtc_configuration={
-                "iceServers": [
-                    {"urls": ["stun:stun.l.google.com:19302"]},
-                    {"urls": ["stun:stun1.l.google.com:19302"]},
-                    {"urls": ["stun:stun2.l.google.com:19302"]},
-                    {"urls": ["stun:stun3.l.google.com:19302"]},
-                    {"urls": ["stun:stun4.l.google.com:19302"]},
+                "iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}
                 ]
             },
             media_stream_constraints={"video": True, "audio": False},
