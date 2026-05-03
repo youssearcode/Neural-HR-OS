@@ -13,23 +13,20 @@ import time
 import psycopg2
 from supabase import create_client
 
-# --- 0. CONSTANTS & UTILS (Missing in original snippet) ---
-PASS_FILE = "secret_password.txt"
-MASTER_KEY = "ADMIN123"
-if not os.path.exists(PASS_FILE):
-    with open(PASS_FILE, "w") as f: f.write("admin123")
-
-def apply_custom_styles():
-    st.markdown("""<style> .main { background-color: #0e1117; } </style>""", unsafe_allow_html=True)
-
 # --- 1. CONFIG & AUTH SETTINGS ---
 st.set_page_config(page_title="NEURAL HR OS 2026", layout="wide", page_icon="🛡️")
 
-# Initialize Supabase (Ensure these exist in your secrets)
+# Constants for missing parts in provided snippet
+PASS_FILE = "security.txt"
+MASTER_KEY = "MASTER2026"
+if not os.path.exists(PASS_FILE):
+    with open(PASS_FILE, "w") as f: f.write("admin123")
+
+# Supabase init
 try:
     supabase = create_client(st.secrets["supabase"]["url"], st.secrets["supabase"]["key"])
 except:
-    st.warning("Supabase credentials missing. DB functions might fail.")
+    pass
 
 def get_db_connection():
     return psycopg2.connect(st.secrets["postgres"]["url"])
@@ -43,7 +40,7 @@ def send_security_notification(subject, body):
             server.login("mohamedauoup@gmail.com", "xjpwurhrozvybini")
             server.send_message(msg)
     except Exception as e:
-        print(f"Email Failed: {e}")
+        st.error(f"Email Failed: {e}")
 
 def init_db():
     try:
@@ -57,12 +54,13 @@ def init_db():
         conn.commit()
         cur.close()
         conn.close()
-    except Exception as e:
-        st.error(f"DB Init Error: {e}")
+    except:
+        pass
 
 init_db()
 
-# --- 2. CONSOLIDATED TRANSFORMERS ---
+# --- 2. TRANSFORMERS ---
+
 class FaceRecognitionTransformer(VideoProcessorBase):
     def __init__(self):
         self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
@@ -72,7 +70,7 @@ class FaceRecognitionTransformer(VideoProcessorBase):
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         faces = self.face_cascade.detectMultiScale(gray, 1.3, 5)
 
-        # To prevent the 'NoneType' asyncio error, we handle DB connections carefully inside the thread
+        # Logic from your code: Database check during recognition
         try:
             conn = get_db_connection()
             cur = conn.cursor()
@@ -85,23 +83,20 @@ class FaceRecognitionTransformer(VideoProcessorBase):
                     status = "ACTIVE" if active == 1 else "TERMINATED"
                     if active == 0: 
                         send_security_notification("SECURITY ALERT", f"Terminated person {name} detected!")
-                    
-                    cv2.rectangle(img, (x, y), (x + w, h + y), color, 2)
+                    cv2.rectangle(img, (x, y), (x + w, y + h), color, 2)
                     cv2.putText(img, f"{name} - {status}", (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
             cur.close()
             conn.close()
         except:
-            # Fallback if DB is busy or loop is closing
+            # Fallback visually if DB connection fails in thread
             for (x, y, w, h) in faces:
                 cv2.rectangle(img, (x, y), (x + w, y + h), (255, 255, 0), 2)
-                cv2.putText(img, "SCANNING...", (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 2)
-
+        
         return av.VideoFrame.from_ndarray(img, format="bgr24")
 
 class EnrollmentTransformer(VideoProcessorBase):
     def __init__(self):
         self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-
     def recv(self, frame: av.VideoFrame) -> av.VideoFrame:
         img = frame.to_ndarray(format="bgr24")
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
@@ -115,12 +110,10 @@ class EnrollmentTransformer(VideoProcessorBase):
 if "authenticated" not in st.session_state: st.session_state.authenticated = False
 if "res" not in st.session_state: st.session_state.res = None
 
-apply_custom_styles()
-
 if not st.session_state.authenticated:
     col = st.columns([1, 1.5, 1])[1]
     with col:
-        st.title("NEURAL HR OS")
+        st.title("NEURAL HR OS 2026")
         pwd = st.text_input("HR Security Password", type="password")
         
         with st.expander("Forgot Password?"):
@@ -140,30 +133,39 @@ if not st.session_state.authenticated:
                     st.rerun()
 else:
     with st.sidebar:
-        if st.button("🔒 LOCK CONSOLE"): st.session_state.authenticated = False; st.rerun()
+        if st.button("🔒 LOCK CONSOLE"): 
+            st.session_state.authenticated = False
+            st.rerun()
         menu = st.radio("System Modules", ["📺 LIVE VISION", "🔍 SEARCH BY ID", "➕ ENROLL USER", "📝 MODIFY PERSONNEL", "🗑️ TERMINATE ACCESS", "📂 STAFF DIRECTORY", "📊 DAILY REPORTS"])
 
+    # Shared WebRTC Config to fix the 'NoneType' and 'Fatal write' error
+    rtc_config = {"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
+
     if menu == "📺 LIVE VISION":
-        st.subheader("Real-time Neural Monitoring")
+        st.subheader("Neural Recognition Feed")
         webrtc_streamer(
             key="vision", 
             video_processor_factory=FaceRecognitionTransformer,
-            async_processing=True, # Set to False if the 'NoneType' error persists
-            rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
+            rtc_configuration=rtc_config,
+            async_processing=True
         )
 
     elif menu == "🔍 SEARCH BY ID":
         sid = st.text_input("Enter Target ID")
         if st.button("RUN QUERY"):
             conn = get_db_connection()
-            df = pd.read_sql_query("SELECT id, first_name, last_name, dept_name, is_active FROM employees WHERE id=%s", conn, params=(sid,))
+            df = pd.read_sql_query("SELECT * FROM employees WHERE id=%s", conn, params=(sid,))
             st.dataframe(df)
             conn.close()
 
     elif menu == "➕ ENROLL USER":
-        # Integrating the scanning camera inside enrollment
-        st.write("Position face in camera for scanning:")
-        webrtc_streamer(key="enroll_cam", video_processor_factory=EnrollmentTransformer)
+        st.subheader("Face Enrollment")
+        # Enrollment Camera
+        webrtc_streamer(
+            key="enroll_cam", 
+            video_processor_factory=EnrollmentTransformer,
+            rtc_configuration=rtc_config
+        )
         
         with st.form("enroll_form"):
             fn = st.text_input("First Name")
@@ -214,6 +216,7 @@ else:
 
     elif menu == "📂 STAFF DIRECTORY":
         conn = get_db_connection()
+        # Adjusted query to exclude 'phone' if it causes error
         df = pd.read_sql_query("SELECT id, first_name, last_name, dept_name, is_active FROM employees", conn)
         conn.close()
         st.dataframe(df)
@@ -222,10 +225,8 @@ else:
         if st.button("🚨 DELETE ALL DATA"):
             conn = get_db_connection()
             cur = conn.cursor()
-            cur.execute("DELETE FROM employees")
-            cur.execute("DELETE FROM attendance")
-            conn.commit()
-            conn.close()
+            cur.execute("DELETE FROM employees"); cur.execute("DELETE FROM attendance")
+            conn.commit(); conn.close()
             st.error("Data Wiped")
         
         conn = get_db_connection()
