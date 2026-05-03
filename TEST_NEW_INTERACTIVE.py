@@ -12,6 +12,13 @@ from datetime import datetime, timedelta
 import time
 import psycopg2
 from supabase import create_client
+import base64
+
+def get_base64_video(path):
+    with open(path, "rb") as f:
+        data = f.read()
+    return base64.b64encode(data).decode()
+
 
 # --- 1. CONFIG & AUTH SETTINGS ---
 st.set_page_config(page_title="NEURAL HR OS 2026", layout="wide", page_icon="🛡️")
@@ -19,7 +26,7 @@ st.set_page_config(page_title="NEURAL HR OS 2026", layout="wide", page_icon="�
 # Constants
 PASS_FILE = "security.txt"
 MASTER_KEY = "MASTER2026"
-VIDEO_PATH = "background.mp4"
+VIDEO_PATH = "1.mp4"
 
 if not os.path.exists(PASS_FILE):
     with open(PASS_FILE, "w") as f: f.write("admin123")
@@ -102,17 +109,40 @@ class EnrollmentTransformer(VideoProcessorBase):
             cv2.putText(img, "SCANNING...", (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
         return av.VideoFrame.from_ndarray(img, format="bgr24")
 
+
 # --- 3. MAIN APP LOGIC ---
 if "authenticated" not in st.session_state: st.session_state.authenticated = False
 if "res" not in st.session_state: st.session_state.res = None
 if "enroll_step" not in st.session_state: st.session_state.enroll_step = 1
 
 if not st.session_state.authenticated:
-    if os.path.exists(VIDEO_PATH): st.video(VIDEO_PATH, loop=True, autoplay=True, muted=True)
+    # --- استبدال st.video بهذا الكود الجديد للخلفية ---
+    if os.path.exists(VIDEO_PATH):
+        video_base64 = get_base64_video(VIDEO_PATH)
+        bg_css = f"""
+        <style>
+        .stApp {{ background: none !important; }}
+        #video-bg {{
+            position: fixed; right: 0; bottom: 0; min-width: 100%; min-height: 100%;
+            z-index: -1; object-fit: cover;
+        }}
+        </style>
+        <video autoplay muted loop id="video-bg">
+            <source src="data:video/mp4;base64,{video_base64}" type="video/mp4">
+        </video>
+        """
+        st.markdown("""
+        <style>
+            /* جعل جداول البيانات شفافة لتظهر الخلفية من خلفها */
+            .stDataFrame { background-color: rgba(255, 255, 255, 0.5) !important; }
+        </style>
+        """, unsafe_allow_html=True)
+
     col = st.columns([1, 1.5, 1])[1]
     with col:
         st.title("🛡️ NEURAL HR OS 2026")
         pwd = st.text_input("HR Security Password", type="password")
+        # بقية الكود الخاص بـ login form...
         with st.expander("🔐 Password Management"):
             mk = st.text_input("Master Key", type="password")
             npwd = st.text_input("New Password", type="password")
@@ -121,15 +151,19 @@ if not st.session_state.authenticated:
                     st.error("Error: Both Master Key and New Password required.")
                     send_security_notification("Security Warning", "Incomplete password reset attempt.")
                 elif mk == MASTER_KEY:
-                    with open(PASS_FILE, "w") as f: f.write(npwd)
-                    st.success("Password Updated!"); st.rerun()
+                    with open(PASS_FILE, "w") as f:
+                        f.write(npwd)
+                    st.success("Password Updated!");
+                    st.rerun()
                 else:
                     st.error("Invalid Master Key.")
                     send_security_notification("Security Alert", "Unauthorized password reset attempt.")
         if st.button("AUTHORIZE ACCESS"):
             with open(PASS_FILE, "r") as f:
                 if pwd == f.read().strip():
-                    st.session_state.authenticated = True; st.rerun()
+                    st.session_state.authenticated = True;
+                    st.rerun()
+
 else:
     with st.sidebar:
         if st.button("🔒 LOCK"): st.session_state.authenticated = False; st.rerun()
@@ -180,7 +214,7 @@ else:
                 n_bl = st.text_input("Blood Type", value=r[10]); n_br = st.text_input("Branch", value=r[11]); n_acc = st.number_input("Access Level", value=r[12])
                 if st.form_submit_button("OVERWRITE"):
                     conn = get_db_connection(); cur = conn.cursor()
-                    cur.execute("UPDATE employees SET first_name=%s, last_name=%s, dept_name=%s, job_title=%s, national_id=%s, dob=%s, hire_date=%s, phone=%s, emergency_contact=%s, blood_type=%s, branch=%s, access_level=%s WHERE id=%s", 
+                    cur.execute("UPDATE employees SET first_name=%s, last_name=%s, dept_name=%s, job_title=%s, national_id=%s, dob=%s, hire_date=%s, phone=%s, emergency_contact=%s, blood_type=%s, branch=%s, access_level=%s WHERE id=%s",
                                 (n_fn, n_ln, n_dept, n_title, n_nid, n_dob, n_hire, n_ph, n_em, n_bl, n_br, n_acc, mid))
                     conn.commit(); conn.close(); st.success("Updated!"); st.session_state['res'] = None; st.rerun()
 
