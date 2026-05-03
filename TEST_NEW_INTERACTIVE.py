@@ -116,7 +116,6 @@ if "res" not in st.session_state: st.session_state.res = None
 if "enroll_step" not in st.session_state: st.session_state.enroll_step = 1
 
 if not st.session_state.authenticated:
-    # --- استبدال st.video بهذا الكود الجديد للخلفية ---
     if os.path.exists(VIDEO_PATH):
         video_base64 = get_base64_video(VIDEO_PATH)
         bg_css = f"""
@@ -133,16 +132,15 @@ if not st.session_state.authenticated:
         """
         st.markdown("""
         <style>
-            /* جعل جداول البيانات شفافة لتظهر الخلفية من خلفها */
             .stDataFrame { background-color: rgba(255, 255, 255, 0.5) !important; }
         </style>
         """, unsafe_allow_html=True)
+        st.markdown(bg_css, unsafe_allow_html=True)
 
     col = st.columns([1, 1.5, 1])[1]
     with col:
         st.title("🛡️ NEURAL HR OS 2026")
         pwd = st.text_input("HR Security Password", type="password")
-        # بقية الكود الخاص بـ login form...
         with st.expander("🔐 Password Management"):
             mk = st.text_input("Master Key", type="password")
             npwd = st.text_input("New Password", type="password")
@@ -153,7 +151,10 @@ if not st.session_state.authenticated:
                 elif mk == MASTER_KEY:
                     with open(PASS_FILE, "w") as f:
                         f.write(npwd)
-                    st.success("Password Updated!");
+                    # إرسال إيميل التأكيد
+                    send_security_notification("SECURITY UPDATE", f"Password has been successfully changed to: {npwd}")
+                    st.success("✅ Password Updated Successfully! A confirmation email has been sent.")
+                    time.sleep(2)
                     st.rerun()
                 else:
                     st.error("Invalid Master Key.")
@@ -206,7 +207,6 @@ else:
             st.session_state['res'] = cur.fetchone(); conn.close()
         if st.session_state['res']:
             with st.form("mod_form"):
-                # Updated to include all 12 parameters
                 r = st.session_state['res']
                 n_fn = st.text_input("First Name", value=r[1]); n_ln = st.text_input("Last Name", value=r[2]); n_dept = st.text_input("Dept", value=r[3])
                 n_title = st.text_input("Job Title", value=r[4]); n_nid = st.text_input("Nat ID", value=r[5]); n_dob = st.text_input("DOB", value=r[6])
