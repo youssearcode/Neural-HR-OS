@@ -19,7 +19,7 @@ st.set_page_config(page_title="NEURAL HR OS 2026", layout="wide", page_icon="ðŸ›
 # Constants
 PASS_FILE = "security.txt"
 MASTER_KEY = "MASTER2026"
-VIDEO_PATH = "1.mp4"
+VIDEO_PATH = "background.mp4"
 
 if not os.path.exists(PASS_FILE):
     with open(PASS_FILE, "w") as f: f.write("admin123")
