@@ -42,6 +42,29 @@ except:
 def get_db_connection():
     return psycopg2.connect(st.secrets["postgres"]["url"])
 
+
+
+
+
+def safe_webrtc_streamer(key, video_processor_factory, rtc_configuration):
+    try:
+        webrtc_streamer(
+            key=key,
+            video_processor_factory=video_processor_factory,
+            media_stream_constraints={"video": True, "audio": False},
+            rtc_configuration=rtc_configuration,
+            async_processing=True
+        )
+    except Exception as e:
+        st.warning(f"Connection issue: {e}. Please refresh the page.")
+
+
+
+
+
+
+
+
 def send_security_notification(subject, body):
     if datetime.now() - st.session_state.last_email_time > timedelta(minutes=2):
         try:
@@ -180,7 +203,7 @@ else:
     }
 
     if menu == "📺 LIVE VISION":
-        webrtc_streamer(key="vision", video_processor_factory=FaceRecognitionTransformer, media_stream_constraints={"video": True, "audio": False}, rtc_configuration=rtc_config,async_processing=True)
+        safe_webrtc_streamer("vision", FaceRecognitionTransformer, rtc_config)
 
     elif menu == "🔍 SEARCH":
         sid = st.text_input("Enter Target ID")
@@ -192,7 +215,7 @@ else:
     elif menu == "➕ ENROLL USER":
         st.subheader("Enrollment Pipeline")
         if st.session_state.enroll_step == 1:
-            webrtc_streamer(key="enroll_scan", video_processor_factory=EnrollmentTransformer, rtc_configuration=rtc_config)
+            safe_webrtc_streamer("enroll_scan", EnrollmentTransformer, rtc_config)
             if st.button("NEXT"): st.session_state.enroll_step = 2; st.rerun()
         else:
             with st.form("enroll_form"):
