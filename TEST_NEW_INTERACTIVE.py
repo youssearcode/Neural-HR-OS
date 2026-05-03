@@ -144,11 +144,18 @@ else:
     if menu == "📺 LIVE VISION":
         st.subheader("Neural Recognition Feed")
         webrtc_streamer(
-            key="vision", 
-            video_processor_factory=FaceRecognitionTransformer,
-            rtc_configuration=rtc_config,
-            async_processing=True
-        )
+    key="vision", 
+    video_processor_factory=FaceRecognitionTransformer,
+    # This prevents the browser from waiting for audio hardware
+    media_stream_constraints={
+        "video": True, 
+        "audio": False
+    },
+    async_processing=True, 
+    rtc_configuration={
+        "iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]
+    }
+)
 
     elif menu == "🔍 SEARCH BY ID":
         sid = st.text_input("Enter Target ID")
