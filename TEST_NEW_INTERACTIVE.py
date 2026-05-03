@@ -51,7 +51,6 @@ def init_db():
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        # Initializing with 12+ parameters
         cur.execute('''CREATE TABLE IF NOT EXISTS employees (
             id SERIAL PRIMARY KEY, first_name TEXT, last_name TEXT, dept_name TEXT, 
             job_title TEXT, national_id TEXT, dob TEXT, hire_date TEXT, 
@@ -118,9 +117,15 @@ if not st.session_state.authenticated:
             mk = st.text_input("Master Key", type="password")
             npwd = st.text_input("New Password", type="password")
             if st.button("RESET PASSWORD"):
-                if mk == MASTER_KEY:
+                if not mk or not npwd:
+                    st.error("Error: Both Master Key and New Password required.")
+                    send_security_notification("Security Warning", "Incomplete password reset attempt.")
+                elif mk == MASTER_KEY:
                     with open(PASS_FILE, "w") as f: f.write(npwd)
-                    st.success("Updated!"); st.rerun()
+                    st.success("Password Updated!"); st.rerun()
+                else:
+                    st.error("Invalid Master Key.")
+                    send_security_notification("Security Alert", "Unauthorized password reset attempt.")
         if st.button("AUTHORIZE ACCESS"):
             with open(PASS_FILE, "r") as f:
                 if pwd == f.read().strip():
@@ -134,6 +139,13 @@ else:
 
     if menu == "📺 LIVE VISION":
         webrtc_streamer(key="vision", video_processor_factory=FaceRecognitionTransformer, media_stream_constraints={"video": True, "audio": False}, rtc_configuration=rtc_config)
+
+    elif menu == "🔍 SEARCH":
+        sid = st.text_input("Enter Target ID")
+        if st.button("RUN QUERY"):
+            conn = get_db_connection()
+            df = pd.read_sql_query("SELECT * FROM employees WHERE id=%s", conn, params=(sid,))
+            st.dataframe(df); conn.close()
 
     elif menu == "➕ ENROLL USER":
         st.subheader("Enrollment Pipeline")
@@ -160,13 +172,17 @@ else:
             st.session_state['res'] = cur.fetchone(); conn.close()
         if st.session_state['res']:
             with st.form("mod_form"):
-                n_fn = st.text_input("First Name", value=st.session_state['res'][1])
-                n_title = st.text_input("Job Title", value=st.session_state['res'][4])
-                # Add other fields here similarly...
+                # Updated to include all 12 parameters
+                r = st.session_state['res']
+                n_fn = st.text_input("First Name", value=r[1]); n_ln = st.text_input("Last Name", value=r[2]); n_dept = st.text_input("Dept", value=r[3])
+                n_title = st.text_input("Job Title", value=r[4]); n_nid = st.text_input("Nat ID", value=r[5]); n_dob = st.text_input("DOB", value=r[6])
+                n_hire = st.text_input("Hire Date", value=r[7]); n_ph = st.text_input("Phone", value=r[8]); n_em = st.text_input("Emergency Contact", value=r[9])
+                n_bl = st.text_input("Blood Type", value=r[10]); n_br = st.text_input("Branch", value=r[11]); n_acc = st.number_input("Access Level", value=r[12])
                 if st.form_submit_button("OVERWRITE"):
                     conn = get_db_connection(); cur = conn.cursor()
-                    cur.execute("UPDATE employees SET first_name=%s, job_title=%s WHERE id=%s", (n_fn, n_title, mid))
-                    conn.commit(); conn.close(); st.success("Updated!"); st.rerun()
+                    cur.execute("UPDATE employees SET first_name=%s, last_name=%s, dept_name=%s, job_title=%s, national_id=%s, dob=%s, hire_date=%s, phone=%s, emergency_contact=%s, blood_type=%s, branch=%s, access_level=%s WHERE id=%s", 
+                                (n_fn, n_ln, n_dept, n_title, n_nid, n_dob, n_hire, n_ph, n_em, n_bl, n_br, n_acc, mid))
+                    conn.commit(); conn.close(); st.success("Updated!"); st.session_state['res'] = None; st.rerun()
 
     elif menu == "📂 DIRECTORY":
         conn = get_db_connection()
