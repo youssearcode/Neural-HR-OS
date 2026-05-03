@@ -115,32 +115,27 @@ if "authenticated" not in st.session_state: st.session_state.authenticated = Fal
 if "res" not in st.session_state: st.session_state.res = None
 if "enroll_step" not in st.session_state: st.session_state.enroll_step = 1
 
-# --- GLOBAL BACKGROUND VIDEO LOGIC ---
-if os.path.exists(VIDEO_PATH):
-    video_base64 = get_base64_video(VIDEO_PATH)
-    bg_css = f"""
-    <style>
-    /* Force the main container to be transparent */
-    .stApp {{ background: none !important; }}
-
-    /* Ensure the video covers the viewport */
-    #video-bg {{
-        position: fixed; right: 0; bottom: 0; min-width: 100%; min-height: 100%;
-        z-index: -1; object-fit: cover;
-    }}
-
-    /* Add semi-transparent background to UI components for readability */
-    .stSidebar, .stDataFrame, .stTextInput, .stExpander, .stForm {{
-        background-color: rgba(255, 255, 255, 0.85) !important;
-        padding: 10px;
-        border-radius: 10px;
-    }}
-    </style>
-    <video autoplay muted loop id="video-bg">
-        <source src="data:video/mp4;base64,{video_base64}" type="video/mp4">
-    </video>
-    """
-    st.markdown(bg_css, unsafe_allow_html=True)
+if not st.session_state.authenticated:
+    if os.path.exists(VIDEO_PATH):
+        video_base64 = get_base64_video(VIDEO_PATH)
+        bg_css = f"""
+        <style>
+        .stApp {{ background: none !important; }}
+        #video-bg {{
+            position: fixed; right: 0; bottom: 0; min-width: 100%; min-height: 100%;
+            z-index: -1; object-fit: cover;
+        }}
+        </style>
+        <video autoplay muted loop id="video-bg">
+            <source src="data:video/mp4;base64,{video_base64}" type="video/mp4">
+        </video>
+        """
+        st.markdown("""
+        <style>
+            .stDataFrame { background-color: rgba(255, 255, 255, 0.5) !important; }
+        </style>
+        """, unsafe_allow_html=True)
+        st.markdown(bg_css, unsafe_allow_html=True)
 
     col = st.columns([1, 1.5, 1])[1]
     with col:
