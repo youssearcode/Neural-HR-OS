@@ -170,7 +170,16 @@ else:
         if st.button("🔒 LOCK"): st.session_state.authenticated = False; st.rerun()
         menu = st.radio("System Modules", ["📺 LIVE VISION", "🔍 SEARCH", "➕ ENROLL USER", "📝 MODIFY PERSONNEL", "🗑️ TERMINATE", "📂 DIRECTORY", "📊 REPORTS"])
 
-    rtc_config = {"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
+    rtc_config = {
+    "iceServers": [
+        {"urls": ["stun:stun.l.google.com:19302"]},
+        {"urls": ["stun:stun1.l.google.com:19302"]},
+        {"urls": ["stun:stun2.l.google.com:19302"]},
+        {"urls": ["stun:stun3.l.google.com:19302"]},
+        {"urls": ["stun:stun4.l.google.com:19302"]}
+    ],
+    "iceTransportPolicy": "all"
+}
 
     if menu == "📺 LIVE VISION":
         webrtc_streamer(key="vision", video_processor_factory=FaceRecognitionTransformer, media_stream_constraints={"video": True, "audio": False}, rtc_configuration=rtc_config)
